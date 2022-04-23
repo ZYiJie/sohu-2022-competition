@@ -4,60 +4,24 @@ import os
 import warnings
 import numpy as np
 import torch
-from pytorch_pretrained_bert import BertTokenizer, BertAdam
+from transformers import AutoTokenizer
+# from pytorch_pretrained_bert import BertTokenizer, BertAdam
+from pytorch_pretrained_bert import BertAdam
 from typing import List
 from sklearn.metrics import f1_score, classification_report, accuracy_score
 from torch.utils.data import DataLoader, RandomSampler, TensorDataset, SequentialSampler
 import torch.nn as nn
 import torch.utils.data
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 from src.utils.load_datasets import get_train_data, get_test_data
 
 warnings.filterwarnings('ignore')
 
 
-def tokenize_corpus(text_list: List[str], entitys, tokenizer: BertTokenizer) -> List[List[int]]:
-    tokenized_data = []
-    for text, entity in tqdm(zip(text_list, entitys)):
-        token = tokenizer.tokenize(text)
-        entity = tokenizer.tokenize(entity)
-        token = ["[CLS]"] + entity + ["[SEP]"] + token + ["[SEP]"]
-        token = tokenizer.convert_tokens_to_ids(token)
-        tokenized_data.append(token)
-    return tokenized_data
-
-
-def mask_token_ids(token_ids: List[List[int]], padded_size):
-    input_ids = []
-    input_types = []
-    input_masks = []
-
-    for token in tqdm(token_ids):
-        types = [0] * (len(token))
-        masks = [1] * (len(token))
-
-        # pad
-        if len(token) < padded_size:
-            types = types + [1] * (padded_size - len(token))
-            masks = masks + [0] * (padded_size - len(token))
-            token = token + [0] * (padded_size - len(token))
-        else:
-            types = types[:padded_size]
-            masks = masks[:padded_size]
-            token = token[:padded_size]
-
-        assert len(token) == len(masks) == len(types) == padded_size
-
-        input_ids.append(token)
-        input_types.append(types)
-        input_masks.append(masks)
-
-    return input_ids, input_types, input_masks
-
-
 def split_train_dataset(input_ids: List[List[int]], input_types: List[List[int]],
                         input_masks: List[List[int]], labels: List[List[int]], batch_size: int, ratio: float) -> (
-        DataLoader, DataLoader):
+DataLoader, DataLoader):
     random_order = list(range(len(input_ids)))
     np.random.shuffle(random_order)
 
@@ -92,7 +56,7 @@ def split_train_dataset(input_ids: List[List[int]], input_types: List[List[int]]
 
 def split_test_dataset(input_ids: List[List[int]], input_types: List[List[int]],
                        input_masks: List[List[int]], batch_size: int) -> (
-        DataLoader, DataLoader):
+DataLoader, DataLoader):
     input_ids_test = np.array(input_ids)
     input_types_test = np.array(input_types)
     input_masks_test = np.array(input_masks)
@@ -199,7 +163,8 @@ def main(args):
     learning_rate = args.learning_rate
     output_path = args.save_model_path
     ratio = args.ratio
-    tokenizer = BertTokenizer(vocab_file=args.tokenizer_path)
+    tokenizer = AutoTokenizer.from_pretrained(args.pretrained_path)
+
 
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -208,20 +173,16 @@ def main(args):
     test_corpus, test_entitys, test_ids = get_test_data(input_file=args.test_input_path)
     print("load train raw corpus, size:{}".format(len(train_corpus)))
     print("load test raw corpus, size:{}".format(len(test_corpus)))
-    # Padding
-    train_corpus = [text[0:padded_size] for text in train_corpus]
-    test_corpus = [text[0:padded_size] for text in test_corpus]
-
-    tokenized_train_data = tokenize_corpus(train_corpus, train_entitys, tokenizer)
-    tokenized_test_data = tokenize_corpus(test_corpus, test_entitys, tokenizer)
-    print("tokenized")
-
-    train_input_ids, train_input_types, train_input_masks = mask_token_ids(tokenized_train_data, padded_size)
-    test_input_ids, test_input_types, test_input_masks = mask_token_ids(tokenized_test_data, padded_size)
-
-    assert len(train_input_ids) == len(train_input_types) == len(train_input_masks) == len(train_labels)
-    assert len(test_input_ids) == len(test_input_types) == len(test_input_masks)
-    print("masked")
+    
+    token_train = tokenizer(train_corpus, train_entitys, max_length=padded_size, 
+                            truncation='longest_first', padding='max_length', 
+                            return_tensors='np')
+    train_input_ids, train_input_types, train_input_masks = token_train['input_ids'], token_train['token_type_ids'], token_train['attention_mask']
+    
+    token_test = tokenizer(test_corpus, test_entitys, max_length=padded_size, 
+                            truncation='longest_first', padding='max_length', 
+                            return_tensors='np')
+    test_input_ids, test_input_types, test_input_masks = token_test['input_ids'], token_test['token_type_ids'], token_test['attention_mask']
 
     # Model
 
@@ -244,7 +205,7 @@ def main(args):
     ]
     optimizer = BertAdam(optimizer_group_parameters,
                          lr=learning_rate,
-                         warmup=0.5,
+                         warmup=0.2,
                          t_total=int(len(train_input_ids) * 0.8) * epochs
                          )
     print("+++ optimizer init +++")

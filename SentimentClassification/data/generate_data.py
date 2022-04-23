@@ -21,8 +21,8 @@ def new_data_piece(id: int, content: str, entity: dict,
         }
 
 if __name__ == '__main__':
-    #
-    input_file = 'raw_data/'
+    
+    input_file = '../../nlp_data/'
     output_file = './'
 
     #train_generate_data
