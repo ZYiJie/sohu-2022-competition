@@ -22,13 +22,14 @@ def new_data_piece(id: int, content: str, entity: dict,
 
 if __name__ == '__main__':
     
-    input_file = '../../nlp_data/'
+    # input_file = '../../nlp_data/'
+    input_file = './'
     output_file = './'
 
     #train_generate_data
-    with open(os.path.join(input_file,"train.txt"), 'r', encoding='utf-8') as f:
+    with open(os.path.join(input_file,"random_sample_train.txt"), 'r', encoding='utf-8') as f:
         lines = f.readlines()
-        with open(os.path.join(output_file,"generated_train_data.txt"), 'w',encoding='utf-8') as fw:
+        with open(os.path.join(output_file,"generated_random_train.txt"), 'w',encoding='utf-8') as fw:
             for line in lines:
                 taskData = json.loads(line.strip())
                 contents = taskData['content']
@@ -38,7 +39,7 @@ if __name__ == '__main__':
                     data = new_data_piece(id, content=contents,
                                           entity=entity, label=int(label),is_train=True)
                     fw.write(json.dumps(data, ensure_ascii=False) + "\n")
-
+    exit()
     #test_generate_data
     with open(os.path.join(input_file,"test.txt"), 'r', encoding='utf-8') as f:
         lines = f.readlines()

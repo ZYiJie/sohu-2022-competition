@@ -205,7 +205,7 @@ def main(args):
     ]
     optimizer = BertAdam(optimizer_group_parameters,
                          lr=learning_rate,
-                         warmup=0.2,
+                         warmup=0.1,
                          t_total=int(len(train_input_ids) * 0.8) * epochs
                          )
     print("+++ optimizer init +++")

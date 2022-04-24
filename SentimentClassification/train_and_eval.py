@@ -19,7 +19,7 @@ def main():
     parser.add_argument('--pretrained_path', type=str, required=False,
                         default="/home/zyj/PTMs/chinese-roberta-wwm-ext/")
     parser.add_argument('--checkpoint_path', type=str, required=False, default=None,help="继续训练")
-    parser.add_argument('--epochs', type=int, default=10, required=False)
+    parser.add_argument('--epochs', type=int, default=20, required=False)
     parser.add_argument('--max_sequence_input', type=int, default=256, required=False)
     parser.add_argument('--batch_size', type=int, default=64, required=False)
     parser.add_argument('--save_state', action='store_true', required=False)

@@ -5,6 +5,37 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
+def merge_idx(idxArr, span, content):
+    assert len(idxArr) >= 1
+    if len(idxArr)==1:
+        return content[max(0,idxArr[0]-span) : min(len(content),idxArr[0]+span)]
+    i = 0
+    ret = []
+    while True:
+        if i>=len(idxArr):break
+        temp_i = i
+        for j in range(i+1,len(idxArr)):
+            if idxArr[j]-idxArr[temp_i] > 2*span:
+                temp_i = j-1
+                break
+            else:
+                temp_i = j
+        ret.append(content[max(0,idxArr[i]-span) : min(len(content),idxArr[temp_i]+span)])    
+        i = temp_i+1
+    return '#'.join(ret)
+            
+def sample_context(entity:str, content:str, length:int):
+    cnt = content.count(entity)
+    span = int(length/cnt/2)
+    assert cnt > 0
+    idx = content.find(entity,0)
+    idxArr = []
+    while idx != -1:
+        idxArr.append(idx)
+        idx = content.find(entity,idx+1)
+    result = merge_idx(idxArr, span, content)
+    return result
+
 def get_train_data(input_file):
     corpus = []
     labels = []
@@ -21,6 +52,7 @@ def get_train_data(input_file):
                 label = 3
             for entity in [raw_entitys]:
                 text = raw_contents.strip()
+                text = sample_context(entity, text, 230)
                 corpus.append(text)
                 entitys.append(entity)
                 labels.append(label)
@@ -41,6 +73,7 @@ def get_test_data(input_file):
             raw_entitys = tmp['entity']
             for entity in [raw_entitys]:
                 text = raw_contents.strip()
+                text = sample_context(entity, text, 230)
                 corpus.append(text)
                 ids.append(raw_id)
                 entitys.append(entity)
