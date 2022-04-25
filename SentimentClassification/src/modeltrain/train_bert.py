@@ -71,7 +71,7 @@ DataLoader, DataLoader):
     return test_loader
 
 
-def train_step(model, device, train_loader, optimizer, epoch, scaler):
+def train_step(model, device, train_loader, optimizer, epoch):
     model.train()
     criterion = nn.CrossEntropyLoss()
     for batch_idx, (x1, x2, x3, y) in enumerate(train_loader):
@@ -226,7 +226,7 @@ def main(args):
                                                      ratio)
     test_loader = split_test_dataset(test_input_ids, test_input_types, test_input_masks, batch_size)
     for epoch in range(1, epochs + 1):
-        train_step(model, DEVICE, train_loader, optimizer, epoch, scaler)
+        train_step(model, DEVICE, train_loader, optimizer, epoch)
         acc, fis, loss = valid_step(model, DEVICE, valid_loader)
         if best_acc < acc:
             best_acc = acc
