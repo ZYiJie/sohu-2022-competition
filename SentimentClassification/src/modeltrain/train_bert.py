@@ -1,6 +1,7 @@
 # _*_ coding:utf-8 _*_
 import json
 import os
+import wandb
 import warnings
 import numpy as np
 import torch
@@ -70,7 +71,7 @@ DataLoader, DataLoader):
     return test_loader
 
 
-def train_step(model, device, train_loader, optimizer, epoch):
+def train_step(model, device, train_loader, optimizer, epoch, scaler):
     model.train()
     criterion = nn.CrossEntropyLoss()
     for batch_idx, (x1, x2, x3, y) in enumerate(train_loader):
@@ -82,6 +83,8 @@ def train_step(model, device, train_loader, optimizer, epoch):
         loss.backward()
         optimizer.step()
 
+        if (batch_idx + 1) % 10 == 0:
+            wandb.log({'train_loss': loss.item(), 'lr':optimizer.param_groups[0]["lr"], 'epoch': epoch})
         if (batch_idx + 1) % 100 == 0:
             print('Train Epoch: {} [{}/{} ({:.2f}%)]\tLoss: {:.6f}'.format(epoch, (batch_idx + 1) * len(x1),
                                                                            len(train_loader.dataset),
@@ -117,7 +120,7 @@ def valid_step(model, device, valid_loader):
 
     print('Average: Accuracy: {:.3f}%, F1Score: {:.3f}'.format(100 * avg_acc, 100 * avg_f1s))
     print(classification_report(valid_true, valid_pred))
-
+    wandb.log({'Accuracy': 100 * avg_acc, 'F1Score':100 * avg_f1s, 'valid_loss':valid_loss})
     return avg_acc, avg_f1s, valid_loss
 
 
@@ -210,6 +213,10 @@ def main(args):
                          )
     print("+++ optimizer init +++")
 
+    
+    # wandb log
+    wandb.init(project='sohu-2022-SentimentClassification') 
+    
     # main train
     best_acc = 0.0
     best_epoch = 0
@@ -219,7 +226,7 @@ def main(args):
                                                      ratio)
     test_loader = split_test_dataset(test_input_ids, test_input_types, test_input_masks, batch_size)
     for epoch in range(1, epochs + 1):
-        train_step(model, DEVICE, train_loader, optimizer, epoch)
+        train_step(model, DEVICE, train_loader, optimizer, epoch, scaler)
         acc, fis, loss = valid_step(model, DEVICE, valid_loader)
         if best_acc < acc:
             best_acc = acc
