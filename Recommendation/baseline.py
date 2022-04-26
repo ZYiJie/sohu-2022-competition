@@ -17,7 +17,7 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 
 flags.DEFINE_integer('batch_size', 1024, 'batch_size')
-flags.DEFINE_integer('embed_dim', 64, 'embed_dim')
+flags.DEFINE_integer('embed_dim', 32, 'embed_dim')
 flags.DEFINE_integer('num_epoch', 1, 'num_epoch')
 flags.DEFINE_float('learning_rate', 0.001, 'learning_rate')
 flags.DEFINE_float('embed_l2', None, 'embedding l2 reg')
@@ -55,7 +55,7 @@ class DeepModel(object):
         self.estimator = tf.estimator.DNNClassifier(
             model_dir=model_dir,
             feature_columns=self.dnn_feature_columns,
-            hidden_units=[64, 12],
+            hidden_units=[32, 8],
             optimizer=optimizer,
             config=config)
 
