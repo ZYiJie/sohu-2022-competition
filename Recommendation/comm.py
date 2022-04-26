@@ -7,6 +7,7 @@ logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 logger = logging.getLogger(__file__)
 import numpy as np
 import pandas as pd
+import random
 
 # 存储数据的根目录
 ROOT_PATH = "./data"
@@ -66,9 +67,12 @@ def stat_data():
 def read_sample_csv(path):
     df = pd.read_csv(path, delimiter=",")
     df["userSeq"] = df["userSeq"].fillna("")
+    df['time'] = pd.to_datetime(df['logTs'],unit='ms',origin=pd.to_datetime('1970-01-01 08:00:00'))
+    df['min'] = df['time'].dt.hour*60 + df['time'].dt.minute
+    df['hour'] = df['time'].dt.hour
     return df
 
-def process_feature(df):
+def process_feature(df, path):
     # id_map_df = pd.read_csv("/Users/andy/Desktop/algoCompetition/dataset/hash/idMap", delimiter="\t")
     # emotion_df = pd.read_csv("/Users/andy/Desktop/algoCompetition/dataset/res_itemId.txt", delimiter="\t")
     # df_1 = pd.merge(df, id_map_df, how='left', left_on="itemId", right_on="hashMpId")
@@ -76,18 +80,29 @@ def process_feature(df):
     # df_2["emotion"] = df_2["emotion"].fillna("-2").map(lambda x:(int)(x))
     # df_2 = df_2.drop(["hashMpId", "mpId"], axis=1)
     # return df_2
-    return df
+    df2 = pd.read_csv(path)
+    result=pd.concat([df,df2],axis=1)
+    return result
 
 
 def generate_offline_sample():
     sample_path = TRAIN_FILE
     df = read_sample_csv(sample_path)
 
-    df = process_feature(df)
+    df = process_feature(df, './data/rec_data/train-co-occurrence-feature.csv')
 
-    valid_data_size = 200000
-    train_df = df.iloc[:-1 * valid_data_size]
-    valid_df = df.iloc[-1 * valid_data_size:]
+    # valid_data_size = 200000
+    # train_df = df.iloc[:-1 * valid_data_size]
+    # valid_df = df.iloc[-1 * valid_data_size:]
+    pvId_list = list(set(df['pvId']))
+    random.shuffle(pvId_list)
+    length = len(pvId_list)
+    train_pvId = pvId_list[:int(length*0.95)]
+    valid_pvId = pvId_list[int(length*0.95):]
+
+    train_df = df.loc[df['pvId'].isin(train_pvId)]
+    valid_df = df.loc[df['pvId'].isin(valid_pvId)]
+
 
     train_output_path = os.path.join(ROOT_PATH, "train", "sample.csv")
     valid_output_path = os.path.join(ROOT_PATH, "evaluate", "sample.csv")
@@ -99,7 +114,7 @@ def generate_offline_sample():
 def generate_submit_sample():
     input_path = TEST_FILE
     df = read_sample_csv(input_path)
-    df = process_feature(df)
+    df = process_feature(df, './data/rec_data/test-co-occurrence-feature.csv')
     output_path = os.path.join(ROOT_PATH, "submit", "sample.csv")
     df.to_csv(output_path, index=False)
     return df

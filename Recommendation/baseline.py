@@ -17,7 +17,7 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 
 flags.DEFINE_integer('batch_size', 1024, 'batch_size')
-flags.DEFINE_integer('embed_dim', 32, 'embed_dim')
+flags.DEFINE_integer('embed_dim', 64, 'embed_dim')
 flags.DEFINE_integer('num_epoch', 1, 'num_epoch')
 flags.DEFINE_float('learning_rate', 0.001, 'learning_rate')
 flags.DEFINE_float('embed_l2', None, 'embedding l2 reg')
@@ -55,7 +55,7 @@ class DeepModel(object):
         self.estimator = tf.estimator.DNNClassifier(
             model_dir=model_dir,
             feature_columns=self.dnn_feature_columns,
-            hidden_units=[32, 8],
+            hidden_units=[64, 12],
             optimizer=optimizer,
             config=config)
 
@@ -132,12 +132,48 @@ def get_feature_columns():
     user_cate = fc.categorical_column_with_hash_bucket("suv", 40000)
     feed_cate = fc.categorical_column_with_hash_bucket("itemId", 4000, tf.int64)
     city_cate = fc.categorical_column_with_hash_bucket("city", 200, tf.int64)
+    
     user_embedding = fc.embedding_column(user_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
     feed_embedding = fc.embedding_column(feed_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
     city_cate_embedding = fc.embedding_column(city_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
+    
     feature_columns.append(user_embedding)
     feature_columns.append(feed_embedding)
     feature_columns.append(city_cate_embedding)
+
+
+    time_cate = fc.categorical_column_with_identity("hour", 24)
+    time_cate_embedding = fc.embedding_column(time_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
+    feature_columns.append(time_cate_embedding)
+
+    # time_cate = fc.categorical_column_with_identity("min", 1440)
+    # time_cate_embedding = fc.embedding_column(time_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
+    # feature_columns.append(time_cate_embedding)
+
+    # time_cate = fc.categorical_column_with_hash_bucket("logTs", 1000, tf.int64)
+    # time_cate_embedding = fc.embedding_column(time_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
+    # feature_columns.append(time_cate_embedding)
+
+
+    # os_cate = fc.categorical_column_with_hash_bucket("osType", 11, tf.int64)
+    # os_cate_embedding = fc.embedding_column(os_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
+    # feature_columns.append(os_cate_embedding)
+
+    device_cate = fc.categorical_column_with_hash_bucket("deviceType", 4, tf.int64)
+    device_cate_embedding = fc.embedding_column(device_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
+    feature_columns.append(device_cate_embedding)
+
+    province_cate = fc.categorical_column_with_hash_bucket("province", 30, tf.int64)
+    province_cate_embedding = fc.embedding_column(province_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
+    feature_columns.append(province_cate_embedding)
+
+    sum_cate = fc.categorical_column_with_hash_bucket("sum", 2000, tf.int64)
+    sum_cate_embedding = fc.embedding_column(sum_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
+    feature_columns.append(sum_cate_embedding)
+
+    seqLen_cate = fc.categorical_column_with_hash_bucket("seqLen", 300, tf.int64)
+    seqLen_cate_embedding = fc.embedding_column(seqLen_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
+    feature_columns.append(seqLen_cate_embedding)
 
     # emotion_cate = fc.categorical_column_with_hash_bucket("emotion", 100, tf.int64)
     # emotion_embedding = fc.embedding_column(emotion_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
@@ -160,7 +196,7 @@ def main(argv):
     print("finish train!")
     # 计算验证集AUC
     evalGAUC = model.evaluate()
-    print("evaluation GAUC = %s" % evalGAUC)
+    print("#"*10, "evaluation GAUC = %s" % evalGAUC)
     # 生成submit文件
     res = model.predict()
 

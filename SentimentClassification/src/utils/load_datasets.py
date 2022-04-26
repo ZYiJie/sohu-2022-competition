@@ -26,8 +26,9 @@ def merge_idx(idxArr, span, content):
             
 def sample_context(entity:str, content:str, length:int):
     cnt = content.count(entity)
+    if cnt == 0:
+        return content
     span = int(length/cnt/2)
-    assert cnt > 0
     idx = content.find(entity,0)
     idxArr = []
     while idx != -1:
