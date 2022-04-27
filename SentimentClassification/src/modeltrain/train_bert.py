@@ -6,6 +6,7 @@ import warnings
 import numpy as np
 import torch
 from transformers import AutoTokenizer
+from torch.cuda.amp import autocast, GradScaler
 # from pytorch_pretrained_bert import BertTokenizer, BertAdam
 from pytorch_pretrained_bert import BertAdam
 from typing import List
@@ -76,13 +77,16 @@ def train_step(model, device, train_loader, optimizer, epoch):
     criterion = nn.CrossEntropyLoss()
     for batch_idx, (x1, x2, x3, y) in enumerate(train_loader):
         x1_g, x2_g, x3_g, y_g = x1.to(device), x2.to(device), x3.to(device), y.to(device)
-        y_pred = model([x1_g, x2_g, x3_g])
-
         optimizer.zero_grad()
-        loss = criterion(y_pred, y_g)
-        loss.backward()
-        optimizer.step()
+        with autocast():
+            y_pred = model([x1_g, x2_g, x3_g])
+            loss = criterion(y_pred, y_g)
+            scaler.scale(loss).backward()
 
+        # loss.backward()
+        # optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
         if (batch_idx + 1) % 10 == 0:
             wandb.log({'train_loss': loss.item(), 'lr':optimizer.param_groups[0]["lr"], 'epoch': epoch})
         if (batch_idx + 1) % 100 == 0:
@@ -101,8 +105,9 @@ def valid_step(model, device, valid_loader):
 
     for batch_idx, (x1, x2, x3, y) in tqdm(enumerate(valid_loader)):
         x1_g, x2_g, x3_g, y_g = x1.to(device), x2.to(device), x3.to(device), y.to(device)
-        with torch.no_grad():
-            y_pred_pa_all = model([x1_g, x2_g, x3_g])
+        with autocast():
+            with torch.no_grad():
+                y_pred_pa_all = model([x1_g, x2_g, x3_g])
         valid_loss += criterion(y_pred_pa_all, y_g)
         batch_true = y_g.cpu()
         batch_pred = y_pred_pa_all.detach().cpu().numpy()
@@ -130,8 +135,9 @@ def test_and_save_reault(model, device, test_loader, test_entitys, test_ids, res
 
     for batch_idx, (x1, x2, x3) in tqdm(enumerate(test_loader)):
         x1_g, x2_g, x3_g = x1.to(device), x2.to(device), x3.to(device)
-        with torch.no_grad():
-            y_pred_pa_all = model([x1_g, x2_g, x3_g])
+        with autocast():
+            with torch.no_grad():
+                y_pred_pa_all = model([x1_g, x2_g, x3_g])
         batch_pred = y_pred_pa_all.detach().cpu().numpy()
         for item in batch_pred:
             test_pred.append(item.argmax(0))
@@ -212,7 +218,9 @@ def main(args):
                          t_total=int(len(train_input_ids) * 0.8) * epochs
                          )
     print("+++ optimizer init +++")
-
+    
+    global scaler 
+    scaler = GradScaler()
     
     # wandb log
     wandb.init(project='sohu-2022-SentimentClassification') 
@@ -247,3 +255,28 @@ def main(args):
         model = torch.load(bert_classifier_path)
     test_and_save_reault(model, DEVICE, test_loader, test_entitys, test_ids, args.result_path)
     print("+++ bert valid done +++")
+
+def pred(args):
+    padded_size = args.max_sequence_input
+    batch_size = args.batch_size
+    tokenizer = AutoTokenizer.from_pretrained(args.pretrained_path)
+
+
+
+    test_corpus, test_entitys, test_ids = get_test_data(input_file=args.test_input_path)
+    print("load test raw corpus, size:{}".format(len(test_corpus)))
+
+    token_test = tokenizer(test_corpus, test_entitys, max_length=padded_size, 
+                            truncation='longest_first', padding='max_length', 
+                            return_tensors='np')
+    test_input_ids, test_input_types, test_input_masks = token_test['input_ids'], token_test['token_type_ids'], token_test['attention_mask']
+    test_loader = split_test_dataset(test_input_ids, test_input_types, test_input_masks, batch_size)
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.device
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    print("+++ load model from %s +++" % args.checkpoint_path)
+    model = torch.load(args.checkpoint_path)
+    test_and_save_reault(model, DEVICE, test_loader, test_entitys, test_ids, args.result_path)
+
+    print("+++ bert pred done +++")

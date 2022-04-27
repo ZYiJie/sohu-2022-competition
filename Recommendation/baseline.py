@@ -167,13 +167,29 @@ def get_feature_columns():
     province_cate_embedding = fc.embedding_column(province_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
     feature_columns.append(province_cate_embedding)
 
+    # sum_cate = fc.categorical_column_with_hash_bucket("sum", 2000, tf.int64)
+    # sum_cate_embedding = fc.embedding_column(sum_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
+    # feature_columns.append(sum_cate_embedding)
+
+    # seqLen_cate = fc.categorical_column_with_hash_bucket("seqLen", 300, tf.int64)
+    # seqLen_cate_embedding = fc.embedding_column(seqLen_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
+    # feature_columns.append(seqLen_cate_embedding)
+
     sum_cate = fc.categorical_column_with_hash_bucket("sum", 2000, tf.int64)
     sum_cate_embedding = fc.embedding_column(sum_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
     feature_columns.append(sum_cate_embedding)
 
-    seqLen_cate = fc.categorical_column_with_hash_bucket("seqLen", 300, tf.int64)
-    seqLen_cate_embedding = fc.embedding_column(seqLen_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
-    feature_columns.append(seqLen_cate_embedding)
+    # seqLen_cate = fc.categorical_column_with_hash_bucket("seqLen", 300, tf.int64)
+    # seqLen_cate_embedding = fc.embedding_column(seqLen_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
+    # feature_columns.append(seqLen_cate_embedding)
+    
+    # mean_cate = fc.categorical_column_with_hash_bucket("mean", 100, tf.int64)
+    # mean_cate_embedding = fc.embedding_column(mean_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
+    # feature_columns.append(mean_cate_embedding)
+
+    # std_cate = fc.categorical_column_with_hash_bucket("std", 100, tf.int64)
+    # std_cate_embedding = fc.embedding_column(std_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)
+    # feature_columns.append(std_cate_embedding)
 
     # emotion_cate = fc.categorical_column_with_hash_bucket("emotion", 100, tf.int64)
     # emotion_embedding = fc.embedding_column(emotion_cate, FLAGS.embed_dim, max_norm=FLAGS.embed_l2)

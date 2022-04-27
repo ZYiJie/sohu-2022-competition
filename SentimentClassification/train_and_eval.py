@@ -29,10 +29,18 @@ def main():
     parser.add_argument('--device', default='0', type=str, required=False, help='设置使用哪些显卡')
     parser.add_argument('--ratio', default=0.8, type=float, required=False, help='训练集比例')
 
+    parser.add_argument('--pred', action='store_true', required=False)
+
     args = parser.parse_args()
-    if args.model_type == "Bert":
-        from src.modeltrain.train_bert import main
-        main(args)
+
+    if args.pred:
+        assert args.checkpoint_path is not None
+        from src.modeltrain.train_bert import pred
+        pred(args)
+    else:
+        if args.model_type == "Bert":
+            from src.modeltrain.train_bert import main
+            main(args)
 
 
 if __name__ == '__main__':
