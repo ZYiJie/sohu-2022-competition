@@ -78,15 +78,16 @@ def train_step(model, device, train_loader, optimizer, epoch):
     for batch_idx, (x1, x2, x3, y) in enumerate(train_loader):
         x1_g, x2_g, x3_g, y_g = x1.to(device), x2.to(device), x3.to(device), y.to(device)
         optimizer.zero_grad()
-        with autocast():
-            y_pred = model([x1_g, x2_g, x3_g])
-            loss = criterion(y_pred, y_g)
-            scaler.scale(loss).backward()
+        # with autocast():
+        y_pred = model([x1_g, x2_g, x3_g])
+        loss = criterion(y_pred, y_g)
+        # scaler.scale(loss).backward()
 
-        # loss.backward()
-        # optimizer.step()
-        scaler.step(optimizer)
-        scaler.update()
+        loss.backward()
+        optimizer.step()
+
+        # scaler.step(optimizer)
+        # scaler.update()
         if (batch_idx + 1) % 10 == 0:
             wandb.log({'train_loss': loss.item(), 'lr':optimizer.param_groups[0]["lr"], 'epoch': epoch})
         if (batch_idx + 1) % 100 == 0:

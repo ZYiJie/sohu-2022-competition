@@ -37,6 +37,53 @@ def sample_context(entity:str, content:str, length:int):
     result = merge_idx(idxArr, span, content)
     return result
 
+def split_sentence(content:str):
+    for each in '，。；！？':
+        content = content.replace(each, each+'##')
+    return content.split('##')
+
+def merge_sentences(expand_idxArr, sentenceArr):
+    length = len(sentenceArr)
+    assert length >= 1
+    if length==1: 
+        return [[max(0,expand_idxArr[0][0]),min(length-1, expand_idxArr[0][1])]]
+    ret = []
+    i, j = expand_idxArr[0]
+    for x, y in expand_idxArr[1:]:
+        if x <= j+1: j = y
+        else:
+            ret.append([max(0,i), min(j,length)])
+            i, j = x, y
+    ret.append([max(0,i), min(j,length-1)])
+    return ret
+
+def expand_hit_sentences(hitIdxArr, sentenceArr, SPAN=1):
+    ret = []
+    for each in hitIdxArr:
+        ret.append([each-SPAN, each+SPAN])
+    ret = merge_sentences(ret, sentenceArr)
+    return ret
+
+def sample_sentence_context(entity:str, content:str):
+    cnt = content.count(entity)
+    if cnt == 0: return content
+    
+    sentenceArr = split_sentence(content)
+    
+    hitIdxArr = []
+    for idx, sentence in enumerate(sentenceArr):
+        if entity in sentence:
+            hitIdxArr.append(idx)
+    
+    if len(hitIdxArr)== 0: return content
+    expand_hitIdxs = expand_hit_sentences(hitIdxArr, sentenceArr)
+    
+    ret = []
+    for i, j in expand_hitIdxs:
+        for ii in range(i,j+1):
+            ret.append(sentenceArr[ii])
+    return ''.join(ret)
+
 def get_train_data(input_file):
     corpus = []
     labels = []
@@ -54,8 +101,10 @@ def get_train_data(input_file):
             for entity in [raw_entitys]:
                 text = raw_contents.strip()
                 text = sample_context(entity, text, 230)
+                # text = sample_sentence_context(entity, text)
                 corpus.append(text)
-                entitys.append(entity)
+                # entitys.append(entity)
+                entitys.append('你对%s怎么看？' % entity)
                 labels.append(label)
     assert len(corpus) == len(labels) == len(entitys)
     return corpus, labels, entitys
@@ -75,8 +124,10 @@ def get_test_data(input_file):
             for entity in [raw_entitys]:
                 text = raw_contents.strip()
                 text = sample_context(entity, text, 230)
+                # text = sample_sentence_context(entity, text)
                 corpus.append(text)
                 ids.append(raw_id)
-                entitys.append(entity)
+                # entitys.append(entity)
+                entitys.append('你对%s怎么看？' % entity)
     assert len(corpus) == len(entitys) == len(ids)
     return corpus, entitys, ids
