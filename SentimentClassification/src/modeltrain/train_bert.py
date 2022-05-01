@@ -17,6 +17,7 @@ import torch.utils.data
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from src.utils.load_datasets import get_train_data, get_test_data
+from src.utils.loss import FocalLoss
 
 warnings.filterwarnings('ignore')
 
@@ -102,7 +103,8 @@ def valid_step(model, device, valid_loader):
     valid_loss = 0.0
     valid_true = []
     valid_pred = []
-    criterion = nn.CrossEntropyLoss()
+    # criterion = nn.CrossEntropyLoss()
+    criterion = FocalLoss(5)
 
     for batch_idx, (x1, x2, x3, y) in tqdm(enumerate(valid_loader)):
         x1_g, x2_g, x3_g, y_g = x1.to(device), x2.to(device), x3.to(device), y.to(device)
