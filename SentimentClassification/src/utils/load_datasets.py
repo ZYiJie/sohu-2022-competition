@@ -100,7 +100,7 @@ def get_train_data(input_file):
                 label = 3
             for entity in [raw_entitys]:
                 text = raw_contents.strip()
-                text = sample_context(entity, text, 490)
+                text = sample_context(entity, text, 230)
                 # text = sample_sentence_context(entity, text)
                 corpus.append(text)
                 entitys.append(entity)
@@ -123,7 +123,7 @@ def get_test_data(input_file):
             raw_entitys = tmp['entity']
             for entity in [raw_entitys]:
                 text = raw_contents.strip()
-                text = sample_context(entity, text, 490)
+                text = sample_context(entity, text, 230)
                 # text = sample_sentence_context(entity, text)
                 corpus.append(text)
                 ids.append(raw_id)

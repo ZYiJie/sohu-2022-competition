@@ -5,10 +5,9 @@ import wandb
 import warnings
 import numpy as np
 import torch
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AdamW, get_cosine_schedule_with_warmup
 from torch.cuda.amp import autocast, GradScaler
 # from pytorch_pretrained_bert import BertTokenizer, BertAdam
-from pytorch_pretrained_bert import BertAdam
 from typing import List
 from sklearn.metrics import f1_score, classification_report, accuracy_score
 from torch.utils.data import DataLoader, RandomSampler, TensorDataset, SequentialSampler
@@ -18,44 +17,63 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from src.utils.load_datasets import get_train_data, get_test_data
 from src.utils.loss import FocalLoss
+from sklearn.model_selection import KFold
+
 
 warnings.filterwarnings('ignore')
 
 
-def split_train_dataset(input_ids: List[List[int]], input_types: List[List[int]],
-                        input_masks: List[List[int]], labels: List[List[int]], batch_size: int, ratio: float) -> (
+# def split_train_dataset(input_ids: List[List[int]], input_types: List[List[int]],
+#                         input_masks: List[List[int]], labels: List[List[int]], batch_size: int, ratio: float) -> (
+# DataLoader, DataLoader):
+#     random_order = list(range(len(input_ids)))
+#     np.random.shuffle(random_order)
+
+#     input_ids_train = np.array([input_ids[i] for i in random_order[:int(len(input_ids) * ratio)]])
+#     input_types_train = np.array([input_types[i] for i in random_order[:int(len(input_ids) * ratio)]])
+#     input_masks_train = np.array([input_masks[i] for i in random_order[:int(len(input_ids) * ratio)]])
+#     y_train = np.array([labels[i] for i in random_order[:int(len(input_ids) * ratio)]])
+
+#     input_ids_test = np.array(
+#         [input_ids[i] for i in random_order[int(len(input_ids) * ratio):]])
+#     input_types_test = np.array(
+#         [input_types[i] for i in random_order[int(len(input_ids) * ratio):]])
+#     input_masks_test = np.array(
+#         [input_masks[i] for i in random_order[int(len(input_ids) * ratio):]])
+#     y_test = np.array([labels[i] for i in random_order[int(len(input_ids) * ratio):]])
+
+#     train_data = TensorDataset(torch.LongTensor(input_ids_train),
+#                                torch.LongTensor(input_types_train),
+#                                torch.LongTensor(input_masks_train),
+#                                torch.LongTensor(y_train))
+#     train_sampler = RandomSampler(train_data)
+#     train_loader = DataLoader(train_data, sampler=train_sampler, batch_size=batch_size, drop_last=True)
+
+#     valid_data = TensorDataset(torch.LongTensor(input_ids_test),
+#                                torch.LongTensor(input_types_test),
+#                                torch.LongTensor(input_masks_test),
+#                                torch.LongTensor(y_test))
+#     valid_sampler = SequentialSampler(valid_data)
+#     valid_loader = DataLoader(valid_data, sampler=valid_sampler, batch_size=batch_size, drop_last=True)
+#     return train_loader, valid_loader
+
+
+def ret_all_dataset(input_ids: List[List[int]], input_types: List[List[int]],
+                        input_masks: List[List[int]], labels: List[List[int]]) -> (
 DataLoader, DataLoader):
     random_order = list(range(len(input_ids)))
     np.random.shuffle(random_order)
 
-    input_ids_train = np.array([input_ids[i] for i in random_order[:int(len(input_ids) * ratio)]])
-    input_types_train = np.array([input_types[i] for i in random_order[:int(len(input_ids) * ratio)]])
-    input_masks_train = np.array([input_masks[i] for i in random_order[:int(len(input_ids) * ratio)]])
-    y_train = np.array([labels[i] for i in random_order[:int(len(input_ids) * ratio)]])
+    input_ids = np.array(input_ids)
+    input_types = np.array(input_types)
+    input_masks = np.array(input_masks)
+    y_train = np.array(labels)
 
-    input_ids_test = np.array(
-        [input_ids[i] for i in random_order[int(len(input_ids) * ratio):]])
-    input_types_test = np.array(
-        [input_types[i] for i in random_order[int(len(input_ids) * ratio):]])
-    input_masks_test = np.array(
-        [input_masks[i] for i in random_order[int(len(input_ids) * ratio):]])
-    y_test = np.array([labels[i] for i in random_order[int(len(input_ids) * ratio):]])
-
-    train_data = TensorDataset(torch.LongTensor(input_ids_train),
-                               torch.LongTensor(input_types_train),
-                               torch.LongTensor(input_masks_train),
+    train_data = TensorDataset(torch.LongTensor(input_ids),
+                               torch.LongTensor(input_types),
+                               torch.LongTensor(input_masks),
                                torch.LongTensor(y_train))
-    train_sampler = RandomSampler(train_data)
-    train_loader = DataLoader(train_data, sampler=train_sampler, batch_size=batch_size, drop_last=True)
-
-    valid_data = TensorDataset(torch.LongTensor(input_ids_test),
-                               torch.LongTensor(input_types_test),
-                               torch.LongTensor(input_masks_test),
-                               torch.LongTensor(y_test))
-    valid_sampler = SequentialSampler(valid_data)
-    valid_loader = DataLoader(valid_data, sampler=valid_sampler, batch_size=batch_size, drop_last=True)
-    return train_loader, valid_loader
-
+    return train_data
 
 def split_test_dataset(input_ids: List[List[int]], input_types: List[List[int]],
                        input_masks: List[List[int]], batch_size: int) -> (
@@ -76,19 +94,22 @@ DataLoader, DataLoader):
 def train_step(model, device, train_loader, optimizer, epoch):
     model.train()
     criterion = nn.CrossEntropyLoss()
+    # criterion = FocalLoss(5)
     for batch_idx, (x1, x2, x3, y) in enumerate(train_loader):
         x1_g, x2_g, x3_g, y_g = x1.to(device), x2.to(device), x3.to(device), y.to(device)
         optimizer.zero_grad()
-        # with autocast():
-        y_pred = model([x1_g, x2_g, x3_g])
-        loss = criterion(y_pred, y_g)
-        # scaler.scale(loss).backward()
+        with autocast():
+            y_pred = model([x1_g, x2_g, x3_g])
+            loss = criterion(y_pred, y_g)
+            scaler.scale(loss).backward()
 
-        loss.backward()
-        optimizer.step()
+        # loss.backward()
+        # optimizer.step()
 
-        # scaler.step(optimizer)
-        # scaler.update()
+        scaler.step(optimizer)
+        scaler.update()
+        optimizer.zero_grad()
+        scheduler.step()
         if (batch_idx + 1) % 10 == 0:
             wandb.log({'train_loss': loss.item(), 'lr':optimizer.param_groups[0]["lr"], 'epoch': epoch})
         if (batch_idx + 1) % 100 == 0:
@@ -103,8 +124,8 @@ def valid_step(model, device, valid_loader):
     valid_loss = 0.0
     valid_true = []
     valid_pred = []
-    # criterion = nn.CrossEntropyLoss()
-    criterion = FocalLoss(5)
+    criterion = nn.CrossEntropyLoss()
+    # criterion = FocalLoss(5)
 
     for batch_idx, (x1, x2, x3, y) in tqdm(enumerate(valid_loader)):
         x1_g, x2_g, x3_g, y_g = x1.to(device), x2.to(device), x3.to(device), y.to(device)
@@ -172,9 +193,10 @@ def main(args):
     batch_size = args.batch_size
     pretrain_path = args.pretrained_path
     save_state = args.save_state
-    learning_rate = args.learning_rate
+    # learning_rate = args.learning_rate
     output_path = args.save_model_path
-    ratio = args.ratio
+    # ratio = args.ratio
+    k_folds = args.kflod
     tokenizer = AutoTokenizer.from_pretrained(args.pretrained_path)
 
 
@@ -209,44 +231,65 @@ def main(args):
     print("+++ model init on {} +++".format(DEVICE))
 
     # optimizer
-    param_optimizer = list(model.named_parameters())
-    no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
-    optimizer_group_parameters = [
-        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
-        {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
-    ]
-    optimizer = BertAdam(optimizer_group_parameters,
-                         lr=learning_rate,
-                         warmup=0.1,
-                         t_total=int(len(train_input_ids) * 0.8) * epochs
-                         )
+    # param_optimizer = list(model.named_parameters())
+    # no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+    # optimizer_group_parameters = [
+    #     {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+    #     {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+    # ]
+    # optimizer = BertAdam(optimizer_group_parameters,
+    #                      lr=learning_rate,
+    #                      warmup=0.1,
+    #                      t_total=int(len(train_input_ids) * 0.8) * epochs
+    #                      )
+    optimizer = AdamW(model.parameters(),lr=1e-5, weight_decay=1e-4)
     print("+++ optimizer init +++")
-    
-    global scaler 
-    scaler = GradScaler()
-    
-    # wandb log
-    wandb.init(project='sohu-2022-SentimentClassification') 
-    
+
+    kfold = KFold(n_splits=k_folds, shuffle=True)
+
     # main train
     best_acc = 0.0
     best_epoch = 0
-    train_loader, valid_loader = split_train_dataset(train_input_ids, train_input_types, train_input_masks,
-                                                     train_labels,
-                                                     batch_size,
-                                                     ratio)
+    train_data = ret_all_dataset(train_input_ids, train_input_types, 
+                                 train_input_masks, train_labels)
+    # train_loader, valid_loader = split_train_dataset(train_input_ids, train_input_types, train_input_masks,
+    #                                                  train_labels,
+    #                                                  batch_size,
+    #                                                  ratio)
     test_loader = split_test_dataset(test_input_ids, test_input_types, test_input_masks, batch_size)
-    for epoch in range(1, epochs + 1):
-        train_step(model, DEVICE, train_loader, optimizer, epoch)
-        acc, fis, loss = valid_step(model, DEVICE, valid_loader)
-        if best_acc < acc:
-            best_acc = acc
-            best_epoch = epoch
-        bert_classifier_path = os.path.join(output_path, 'bert_classifier_epoch{}.pth'.format(epoch))
-        if save_state:
-            torch.save(model.state_dict(), bert_classifier_path)
-        else:
-            torch.save(model, bert_classifier_path)
+
+    # wandb log
+    wandb.init(project='sohu-2022-SentimentClassification-kflod') 
+
+    global scaler, scheduler
+    step_num = int(len(train_data)/batch_size)
+    scheduler = get_cosine_schedule_with_warmup(optimizer, step_num,
+                                                epochs * k_folds * step_num)
+    
+    scaler = GradScaler()
+    for fold, (train_ids, val_ids) in enumerate(kfold.split(train_data)):
+        print(f'---------------- FOLD {fold} ----------------')
+        train_subsampler = torch.utils.data.SubsetRandomSampler(train_ids)
+        val_subsampler = torch.utils.data.SubsetRandomSampler(val_ids)
+        train_loader = torch.utils.data.DataLoader(
+                      train_data, 
+                      batch_size=batch_size, sampler=train_subsampler)
+        val_loader = torch.utils.data.DataLoader(
+                        train_data,
+                        batch_size=batch_size, sampler=val_subsampler)
+
+        for epoch in range(1, epochs + 1):
+            epoch += epochs*fold
+            train_step(model, DEVICE, train_loader, optimizer, epoch)
+            acc, fis, loss = valid_step(model, DEVICE, val_loader)
+            if best_acc < acc:
+                best_acc = acc
+                best_epoch = epoch
+            bert_classifier_path = os.path.join(output_path, 'bert_classifier_epoch{}.pth'.format(epoch))
+            if save_state:
+                torch.save(model.state_dict(), bert_classifier_path)
+            else:
+                torch.save(model, bert_classifier_path)
     print("+++ bert train done +++")
 
     # valid
@@ -263,8 +306,6 @@ def pred(args):
     padded_size = args.max_sequence_input
     batch_size = args.batch_size
     tokenizer = AutoTokenizer.from_pretrained(args.pretrained_path)
-
-
 
     test_corpus, test_entitys, test_ids = get_test_data(input_file=args.test_input_path)
     print("load test raw corpus, size:{}".format(len(test_corpus)))

@@ -27,7 +27,8 @@ def main():
 
 
     parser.add_argument('--device', default='0', type=str, required=False, help='设置使用哪些显卡')
-    parser.add_argument('--ratio', default=0.8, type=float, required=False, help='训练集比例')
+    # parser.add_argument('--ratio', default=0.8, type=float, required=False, help='训练集比例')
+    parser.add_argument('--kflod', default=5, type=int, required=False, help='k折交叉')
 
     parser.add_argument('--pred', action='store_true', required=False)
 
