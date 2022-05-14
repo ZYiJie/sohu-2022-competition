@@ -7,7 +7,6 @@ import numpy as np
 import torch
 from transformers import AutoTokenizer, AdamW, get_cosine_schedule_with_warmup
 from torch.cuda.amp import autocast, GradScaler
-# from pytorch_pretrained_bert import BertTokenizer, BertAdam
 from typing import List
 from sklearn.metrics import f1_score, classification_report, accuracy_score
 from torch.utils.data import DataLoader, RandomSampler, TensorDataset, SequentialSampler
@@ -21,41 +20,6 @@ from sklearn.model_selection import KFold
 
 
 warnings.filterwarnings('ignore')
-
-
-# def split_train_dataset(input_ids: List[List[int]], input_types: List[List[int]],
-#                         input_masks: List[List[int]], labels: List[List[int]], batch_size: int, ratio: float) -> (
-# DataLoader, DataLoader):
-#     random_order = list(range(len(input_ids)))
-#     np.random.shuffle(random_order)
-
-#     input_ids_train = np.array([input_ids[i] for i in random_order[:int(len(input_ids) * ratio)]])
-#     input_types_train = np.array([input_types[i] for i in random_order[:int(len(input_ids) * ratio)]])
-#     input_masks_train = np.array([input_masks[i] for i in random_order[:int(len(input_ids) * ratio)]])
-#     y_train = np.array([labels[i] for i in random_order[:int(len(input_ids) * ratio)]])
-
-#     input_ids_test = np.array(
-#         [input_ids[i] for i in random_order[int(len(input_ids) * ratio):]])
-#     input_types_test = np.array(
-#         [input_types[i] for i in random_order[int(len(input_ids) * ratio):]])
-#     input_masks_test = np.array(
-#         [input_masks[i] for i in random_order[int(len(input_ids) * ratio):]])
-#     y_test = np.array([labels[i] for i in random_order[int(len(input_ids) * ratio):]])
-
-#     train_data = TensorDataset(torch.LongTensor(input_ids_train),
-#                                torch.LongTensor(input_types_train),
-#                                torch.LongTensor(input_masks_train),
-#                                torch.LongTensor(y_train))
-#     train_sampler = RandomSampler(train_data)
-#     train_loader = DataLoader(train_data, sampler=train_sampler, batch_size=batch_size, drop_last=True)
-
-#     valid_data = TensorDataset(torch.LongTensor(input_ids_test),
-#                                torch.LongTensor(input_types_test),
-#                                torch.LongTensor(input_masks_test),
-#                                torch.LongTensor(y_test))
-#     valid_sampler = SequentialSampler(valid_data)
-#     valid_loader = DataLoader(valid_data, sampler=valid_sampler, batch_size=batch_size, drop_last=True)
-#     return train_loader, valid_loader
 
 
 def ret_all_dataset(input_ids: List[List[int]], input_types: List[List[int]],
@@ -90,6 +54,7 @@ DataLoader, DataLoader):
 
     return test_loader
 
+# def train_kflod()
 
 def train_step(model, device, train_loader, optimizer, epoch):
     model.train()
@@ -230,18 +195,6 @@ def main(args):
     model = model.cuda(device=DEVICE)
     print("+++ model init on {} +++".format(DEVICE))
 
-    # optimizer
-    # param_optimizer = list(model.named_parameters())
-    # no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
-    # optimizer_group_parameters = [
-    #     {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
-    #     {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
-    # ]
-    # optimizer = BertAdam(optimizer_group_parameters,
-    #                      lr=learning_rate,
-    #                      warmup=0.1,
-    #                      t_total=int(len(train_input_ids) * 0.8) * epochs
-    #                      )
     optimizer = AdamW(model.parameters(),lr=1e-5, weight_decay=1e-4)
     print("+++ optimizer init +++")
 

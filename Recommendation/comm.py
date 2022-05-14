@@ -72,7 +72,7 @@ def read_sample_csv(path):
     df['hour'] = df['time'].dt.hour
     return df
 
-def process_feature(df, path):
+def process_feature(df, path1, path2):
     # id_map_df = pd.read_csv("/Users/andy/Desktop/algoCompetition/dataset/hash/idMap", delimiter="\t")
     # emotion_df = pd.read_csv("/Users/andy/Desktop/algoCompetition/dataset/res_itemId.txt", delimiter="\t")
     # df_1 = pd.merge(df, id_map_df, how='left', left_on="itemId", right_on="hashMpId")
@@ -80,8 +80,9 @@ def process_feature(df, path):
     # df_2["emotion"] = df_2["emotion"].fillna("-2").map(lambda x:(int)(x))
     # df_2 = df_2.drop(["hashMpId", "mpId"], axis=1)
     # return df_2
-    df2 = pd.read_csv(path)
-    result=pd.concat([df,df2],axis=1)
+    df1 = pd.read_csv(path1)
+    df2 = pd.read_csv(path2)
+    result=pd.concat([df,df1,df2],axis=1)
     return result
 
 
@@ -89,7 +90,8 @@ def generate_offline_sample():
     sample_path = TRAIN_FILE
     df = read_sample_csv(sample_path)
 
-    df = process_feature(df, './data/rec_data/train-co-occurrence-feature.csv')
+    df = process_feature(df, './data/rec_data/train-co-occurrence-feature.csv',
+                                './data/rec_data/train-itemId-feature.csv')
 
     # valid_data_size = 200000
     # train_df = df.iloc[:-1 * valid_data_size]
@@ -114,7 +116,8 @@ def generate_offline_sample():
 def generate_submit_sample():
     input_path = TEST_FILE
     df = read_sample_csv(input_path)
-    df = process_feature(df, './data/rec_data/test-co-occurrence-feature.csv')
+    df = process_feature(df, './data/rec_data/test-co-occurrence-feature.csv',
+                                './data/rec_data/test-itemId-feature.csv')
     output_path = os.path.join(ROOT_PATH, "submit", "sample.csv")
     df.to_csv(output_path, index=False)
     return df
