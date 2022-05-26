@@ -3,7 +3,7 @@
 
 import os
 
-OUTPUT_DIR = './allData-roberta-noWeighted-saved/'
+OUTPUT_DIR = './roberta-base_all_saved/'
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
@@ -20,6 +20,7 @@ import time
 import random
 import warnings
 import wandb
+from collections import Counter
 
 warnings.filterwarnings("ignore")
 
@@ -39,10 +40,10 @@ print(f"transformers.__version__: {transformers.__version__}")
 from transformers import AutoTokenizer, AutoModel, AutoConfig
 from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
 # from  dice_loss import  DiceLoss
-from focalloss import FocalLoss
+# from focalloss import FocalLoss
 transformers.logging.set_verbosity_error()
 #get_ipython().run_line_magic('env', 'TOKENIZERS_PARALLELISM=true')
-
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -53,11 +54,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class CFG:
     apex=True
     num_workers=0
-    train_file = '../data/generated_random_train.txt'    
-    # train_file = '../data/generated_train_data.txt'    
-    test_file = '../data/generated_test_data.txt'
-    model="/home/yjw/ZYJ_WorkSpace/PTMs/chinese-roberta-wwm-ext/" 
-    # model="/home/yjw/ZYJ_WorkSpace/PTMs/CirBERTa-Chinese-Base/" 
+    train_file = '../../nlp_data/train.txt'    
+    test_file = '../../nlp_data/test.txt'
+    model="/home/zyj/PTMs/chinese-roberta-wwm-ext-large/" 
     scheduler='cosine'                   # ['linear', 'cosine'] # lr scheduler 类型
     batch_scheduler=True                 # 是否每个step结束后更新 lr scheduler
     num_cycles=0.5                       # 如果使用 cosine lr scheduler， 该参数决定学习率曲线的形状，0.5代表半个cosine曲线
@@ -66,15 +65,15 @@ class CFG:
     last_epoch=-1                        # 从第 last_epoch +1 个epoch开始训练
     encoder_lr=2e-5                      # 预训练模型内部参数的学习率
     decoder_lr=2e-5                      # 自定义输出层的学习率
-    batch_size=25
+    batch_size=10
     max_len=512                     
     weight_decay=0.01        
     gradient_accumulation_steps=1        # 梯度累计步数，1代表每个batch更新一次
     # max_grad_norm=1000  
     seed=42 
-    n_fold=4                             # 总共划分数据的份数
-    trn_fold=[0,1,2,3]                   # 需要训练的折数，比如一共划分了4份，则可以对应训练4个模型，1代表用编号为1的折做验证，其余折做训练
-    train=False
+    n_fold=10                             # 总共划分数据的份数
+    trn_fold=[0]                   # 需要训练的折数，比如一共划分了4份，则可以对应训练4个模型，1代表用编号为1的折做验证，其余折做训练
+    train=True
 
 
 # In[6]:
@@ -141,52 +140,98 @@ def sample_context(entity:str, content:str, length:int):
     result = merge_idx(idxArr, span, content)
     return result
 
+class BM25_Model(object):
+    def __init__(self, documents_list, k1=2, k2=1, b=0.75):
+        self.documents_list = documents_list
+        self.documents_number = len(documents_list)
+        self.avg_documents_len = sum([len(document) for document in documents_list]) / self.documents_number
+        self.f = []
+        self.idf = {}
+        self.k1 = k1
+        self.k2 = k2
+        self.b = b
+        self.init()
+
+    def init(self):
+        df = {}
+        for document in self.documents_list:
+            temp = {}
+            for word in document:
+                temp[word] = temp.get(word, 0) + 1
+            self.f.append(temp)
+            for key in temp.keys():
+                df[key] = df.get(key, 0) + 1
+        for key, value in df.items():
+            self.idf[key] = np.log((self.documents_number - value + 0.5) / (value + 0.5))
+
+    def get_score(self, index, query):
+        score = 0.0
+        document_len = len(self.f[index])
+        qf = Counter(query)
+        for q in query:
+            if q not in self.f[index]:
+                continue
+            score += self.idf[q] * (self.f[index][q] * (self.k1 + 1) / (
+                    self.f[index][q] + self.k1 * (1 - self.b + self.b * document_len / self.avg_documents_len))) * (
+                             qf[q] * (self.k2 + 1) / (qf[q] + self.k2))
+
+        return score
+
+    def get_documents_score(self, query):
+        score_list = []
+        for i in range(self.documents_number):
+            score_list.append(self.get_score(i, query))
+        return score_list
+    
 def split_sentence(content:str):
-    for each in '。；！？':
+    for each in '。；！!?？':
         content = content.replace(each, each+'##')
     return content.split('##')
 
-def merge_sentences(expand_idxArr, sentenceArr):
-    length = len(sentenceArr)
-    assert length >= 1
-    if length==1: 
-        return [[max(0,expand_idxArr[0][0]),min(length-1, expand_idxArr[0][1])]]
-    ret = []
-    i, j = expand_idxArr[0]
-    for x, y in expand_idxArr[1:]:
-        if x <= j+1: j = y
-        else:
-            ret.append([max(0,i), min(j,length)])
-            i, j = x, y
-    ret.append([max(0,i), min(j,length-1)])
-    return ret
+def bm25_sample(content, query, augment=1, length=512):
+    """
+    bm25相似度打分，然后进行截断，使其<=length
+    :param query:
+    :param content:
+    :param length:
+    :return:
+    """
 
-def expand_hit_sentences(hitIdxArr, sentenceArr, SPAN=1):
-    ret = []
-    for each in hitIdxArr:
-        ret.append([each-SPAN, each+SPAN])
-    ret = merge_sentences(ret, sentenceArr)
-    return ret
+    if len(content) <= length:
+        return [content]
+    else:
+        document_list = split_sentence(content.strip())
+        rest_document_list = list()
+        for document in document_list:
+            if len(document) != 0:
+                rest_document_list.append(document)
 
-def sample_sentence_context(entity:str, content:str):
-    cnt = content.count(entity)
-    if cnt == 0: return content
-    
-    sentenceArr = split_sentence(content)
-    
-    hitIdxArr = []
-    for idx, sentence in enumerate(sentenceArr):
-        if entity in sentence:
-            hitIdxArr.append(idx)
-    
-    if len(hitIdxArr)== 0: return content
-    expand_hitIdxs = expand_hit_sentences(hitIdxArr, sentenceArr)
-    
-    ret = []
-    for i, j in expand_hitIdxs:
-        for ii in range(i,j+1):
-            ret.append(sentenceArr[ii])
-    return ''.join(ret)
+        document_list = rest_document_list
+        model = BM25_Model(document_list)
+        scores = model.get_documents_score(query)
+        index_scores = []
+        for index, score_i in enumerate(scores):
+            index_scores.append((index, score_i))
+
+        index_scores.sort(key=lambda index_score: index_score[1], reverse=True)
+        
+        save_document = [0] * len(document_list)
+        content_length = 0
+        
+        for item in index_scores:
+            index = item[0]
+            save_document[index] = 1
+            if content_length + len(document_list[index]) > length:
+                break
+            else:
+                content_length += len(document_list[index])
+        if augment ==1: # 不进行数据增强
+            new_content = ""
+            for i, save in enumerate(save_document):
+                if save != 0:
+                    new_content += document_list[i]
+            # print(len(new_content),'|',new_content)
+            return [new_content]
 
 def get_train_data(input_file):
     corpus = []
@@ -195,14 +240,13 @@ def get_train_data(input_file):
     with open(input_file, 'r', encoding='utf-8') as f:
         for line in f:
             tmp = json.loads(line.strip())
-            raw_contents = tmp['content']
-            raw_entitys = tmp['entity']
-            label = int(tmp["label"])
-            label += 2 ##
-            for entity in [raw_entitys]:
-                text = raw_contents.strip()
-                text = sample_context(entity, text, CFG.max_len-20)
-                # text = sample_sentence_context(entity, text)
+            raw_contents = tmp['content']            
+            for entity,label in tmp['entity'].items():
+                label = int(label) + 2
+                raw_content = raw_contents.strip()
+                # text = sample_context(entity, text, CFG.max_len-20)
+                texts = bm25_sample(raw_content, entity, length=CFG.max_len-len(entity))
+                text = texts[0]
                 corpus.append(text)
                 entitys.append(entity)
                 labels.append(label)
@@ -221,10 +265,11 @@ def get_test_data(input_file):
             raw_id = tmp['id']
             raw_contents = tmp['content']
             raw_entitys = tmp['entity']
-            for entity in [raw_entitys]:
-                text = raw_contents.strip()
-                text = sample_context(entity, text, CFG.max_len-20)
-                # text = sample_sentence_context(entity, text)
+            for entity in raw_entitys:
+                raw_content = raw_contents.strip()
+                # text = sample_context(entity, text, CFG.max_len-20)
+                texts = bm25_sample(raw_content, entity, length=CFG.max_len-len(entity))
+                text = texts[0]
                 corpus.append(text)
                 ids.append(raw_id)
                 entitys.append(entity)
@@ -347,7 +392,7 @@ class CustomModel(nn.Module):
     def loss(self,logits,labels):
         # loss_fnc = nn.CrossEntropyLoss()
         # loss_fnc = FocalLoss(5)
-        loss_fnc = nn.CrossEntropyLoss(weight=torch.from_numpy(np.array([2,1,0.5,1,3])).float() ,
+        loss_fnc = nn.CrossEntropyLoss(weight=torch.from_numpy(np.array([2, 1, 0.5, 1, 3])).float() ,
                                         size_average=True).cuda()
         # loss_fnc = DiceLoss(smooth = 1, square_denominator = True, with_logits = True,  alpha = 0.01 )
         loss = loss_fnc(logits, labels)
@@ -401,40 +446,9 @@ class AverageMeter(object):
 # In[13]:
 
 
-def train_fn(fold, train_loader,model, optimizer, epoch, scheduler, device):
-    model.train()
-    scaler = torch.cuda.amp.GradScaler(enabled=CFG.apex)
-    losses = AverageMeter()
-    # start = end = time.time()
-    global_step = 0
-    grad_norm = 0
-    tk0=tqdm(enumerate(train_loader),total=len(train_loader))
-    for step, (inputs, labels) in tk0:
-        for k, v in inputs.items():
-            inputs[k] = v.to(device)
-        labels = labels.to(device)
-        batch_size = labels.size(0)
-        with torch.cuda.amp.autocast(enabled=CFG.apex):
-            loss = model(inputs,labels,training=True)
-        if CFG.gradient_accumulation_steps > 1:
-            loss = loss / CFG.gradient_accumulation_steps
-        if torch.cuda.device_count() > 1:
-            loss = loss.mean()
-        losses.update(loss.item(), batch_size)
-        scaler.scale(loss).backward()
-        # grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), CFG.max_grad_norm)
-        if (step + 1) % 10 == 0:
-            wandb.log({'train_loss':loss, 'lr':optimizer.param_groups[0]["lr"], 'flod':fold, 'epoch': epoch})
-
-        if (step + 1) % CFG.gradient_accumulation_steps == 0:
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad()
-            global_step += 1
-            if CFG.batch_scheduler:
-                scheduler.step()
-        tk0.set_postfix(Epoch=epoch+1, Loss=losses.avg,lr=scheduler.get_lr()[0])
-    return losses.avg
+# def train_fn(fold, train_loader,model, optimizer, epoch, scheduler, device):
+    
+#     return losses.avg
 
 def valid_fn(valid_loader, model, device):
     model.eval()
@@ -543,27 +557,64 @@ def train_loop(folds, fold):
     # ====================================================
     # loop
     # ====================================================
-
+    best_score = 0
+    total_step = 0
     for epoch in range(CFG.epochs-1-CFG.last_epoch):
 
         start_time = time.time()
         # train
-        avg_loss = train_fn(fold, train_loader, model, optimizer, epoch, scheduler, device)
+        model.train()
+        scaler = torch.cuda.amp.GradScaler(enabled=CFG.apex)
+        losses = AverageMeter()
+        # start = end = time.time()
+        global_step = 0
+        grad_norm = 0
+        tk0=tqdm(enumerate(train_loader),total=len(train_loader))
+        for step, (inputs, labels) in tk0:
+            total_step += 1
+            for k, v in inputs.items():
+                inputs[k] = v.to(device)
+            labels = labels.to(device)
+            batch_size = labels.size(0)
+            with torch.cuda.amp.autocast(enabled=CFG.apex):
+                loss = model(inputs,labels,training=True)
+            if CFG.gradient_accumulation_steps > 1:
+                loss = loss / CFG.gradient_accumulation_steps
+            if torch.cuda.device_count() > 1:
+                loss = loss.mean()
+            losses.update(loss.item(), batch_size)
+            scaler.scale(loss).backward()
+            # grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), CFG.max_grad_norm)
+            if (step + 1) % 10 == 0:
+                wandb.log({'train_loss':loss, 'lr':optimizer.param_groups[0]["lr"], 'flod':fold, 'epoch': epoch})
+
+            if (step + 1) % CFG.gradient_accumulation_steps == 0:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+                global_step += 1
+                if CFG.batch_scheduler:
+                    scheduler.step()
+            tk0.set_postfix(Epoch=epoch+1, Loss=losses.avg,lr=scheduler.get_lr()[0])
 
 
-        # eval
-        avg_acc, avg_f1s = valid_fn(valid_loader, model, device)
+            # eval
+            if (step + 1) % int(len(train_loader)/3) == 0: # 一个epoch evaluate 3 次
+                # eval
+                
+                avg_acc, avg_f1s = valid_fn(valid_loader, model, device)
+                LOGGER.info(f'EVAL on epoch={epoch+1} step={step+1} - Score: {avg_f1s:.4f}')
+                wandb.log({'valid_f1':avg_f1s, 'flod':fold, 'epoch': epoch, 'valid_step':total_step})
+
+                if best_score < avg_f1s:
+                    best_score = avg_f1s
+                    LOGGER.info(f'Epoch {epoch+1} - Save Best Score: f1: {best_score:.4f} Model')
+                    torch.save(model.state_dict(),OUTPUT_DIR+f"model_fold{fold}_best.bin")
 
         elapsed = time.time() - start_time
-
+        avg_loss = losses.avg
         LOGGER.info(f'Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f} time: {elapsed:.0f}s')
-        LOGGER.info(f'Epoch {epoch+1} - Score: {avg_f1s:.4f}')
-        wandb.log({'valid_f1':avg_f1s, 'flod':fold, 'epoch': epoch})
 
-        if best_score < avg_f1s:
-            best_score = avg_f1s
-            LOGGER.info(f'Epoch {epoch+1} - Save Best Score: f1: {best_score:.4f} Model')
-            torch.save(model.state_dict(),OUTPUT_DIR+f"model_fold{fold}_best.bin")
 
     torch.cuda.empty_cache()
     gc.collect()

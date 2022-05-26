@@ -73,7 +73,7 @@
 | 1-3               | 54.484   | 53.000   |
 | +hour             | 54.689   | None     |
 | +min              | 54.286   | None     |
-| +logTs            | 54.251   | None     |
+| +                      | 54.251   | None     |
 | +osType           | 54.299   | None     |
 | +deviceType       | 54.792   | None     |
 | +hour +deviceType | 56.166   | 54.331   |

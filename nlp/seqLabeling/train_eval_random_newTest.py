@@ -6,11 +6,10 @@
 
 #!/usr/bin/env python
 # coding: utf-8
-
-
 import os
 
-OUTPUT_DIR = './shufData_ernie_sample_fold4_saved/'
+OUTPUT_DIR = './mask_newTest_ernie_sample_saved/'
+# OUTPUT_DIR = './tmp/'
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
@@ -42,7 +41,7 @@ print(f"transformers.__version__: {transformers.__version__}")
 from transformers import AutoTokenizer, AutoModel, AutoConfig
 from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
 # from  dice_loss import  DiceLoss
-from  focalloss import  FocalLoss
+# from  focalloss import  FocalLoss
 transformers.logging.set_verbosity_error()
 #get_ipython().run_line_magic('env', 'TOKENIZERS_PARALLELISM=true')
 
@@ -50,6 +49,7 @@ transformers.logging.set_verbosity_error()
 # ### 参数
 
 # In[2]:
+
 
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -75,7 +75,7 @@ class CFG:
     last_epoch=-1                        # 从第 last_epoch +1 个epoch开始训练
     encoder_lr=2e-5                      # 预训练模型内部参数的学习率
     decoder_lr=2e-5                      # 自定义输出层的学习率
-    batch_size=25
+    batch_size=32
     max_len=512                     
     weight_decay=0.01        
     gradient_accumulation_steps=1        # 梯度累计步数，1代表每个batch更新一次
@@ -86,7 +86,7 @@ class CFG:
     train=True
 
 
-# In[6]:
+# In[3]:
 
 
 import json
@@ -125,7 +125,7 @@ seed_everything(seed=42)
 
 # #### mean span content
 
-# In[3]:
+# In[4]:
 
 
 #=====将官方txt数据转换成我们所需的格式==
@@ -169,9 +169,9 @@ def sample_context_by_list(entitys:list, content:str, length:int):
     return result
 
 
-# #### sentence sample
+# #### BM25
 
-# In[4]:
+# In[5]:
 
 
 class BM25_Model(object):
@@ -286,10 +286,11 @@ def bm25_sample(content, query, augment=1, length=512):
         #     return new_content_arr
 
 
-
 # ### 数据format
 
-# In[5]:
+# #### encode_labels
+
+# In[6]:
 
 
 def encode_labels(text, entity_items):
@@ -312,18 +313,18 @@ def encode_labels(text, entity_items):
 
     return content_label, entity_label, content_id, entity_id
 
-def create_mask(text, entityArr):
-    content_mask = [0] * len(text)
-    entity_mask = []
-    for id, entity in enumerate(entityArr):
-        entity_mask += [id+1] * len(entity)
+# def create_mask(text, entityArr):
+#     content_mask = [0] * len(text)
+#     entity_mask = []
+#     for id, entity in enumerate(entityArr):
+#         entity_mask += [id+1] * len(entity)
         
-        idx = text.find(entity,0)
-        while idx >=0 :
-            for i in range(idx,idx+len(entity)):
-                content_mask[i] = id + 1
-            idx = text.find(entity,idx+1)
-    return content_mask, entity_mask
+#         idx = text.find(entity,0)
+#         while idx >=0 :
+#             for i in range(idx,idx+len(entity)):
+#                 content_mask[i] = id + 1
+#             idx = text.find(entity,idx+1)
+#     return content_mask, entity_mask
 
 def cal_mean_weight(entitys, entity_weight_dic):
     temp = []
@@ -332,6 +333,11 @@ def cal_mean_weight(entitys, entity_weight_dic):
     # temp = sorted(temp)
     # return temp[-1] # 最大值
     return np.mean(temp) #均值
+
+
+# #### getData
+
+# In[7]:
 
 
 def get_train_data(input_file):
@@ -347,23 +353,30 @@ def get_train_data(input_file):
             tmp = json.loads(line.strip())
             raw_contents = tmp['content'].strip()
             entityArr = list(tmp['entity'].keys())
-            entity_content = '、'.join(entityArr)
-            text = sample_context_by_list(entityArr, raw_contents, CFG.max_len-len(entity_content))
+            entity_content = ''.join(entityArr)
             
-            # labels = tmp['entity'].values()
-            # if -2 in labels:
-            #     augment = 2
-            # elif 2 in labels:
-            #     augment = 2
-            # else:
-            #     augment = 1
-            # augment = 1
-            # texts = bm25_sample(raw_contents, ''.join(entityArr), augment=augment,length=CFG.max_len-len(entity_content))
             weight = cal_mean_weight(entityArr, entity_weight_dic)
 
-            # text = text[:CFG.max_len-len(entity_content)-3]  # [cls]text[sep]entity_content[sep]
+            text = sample_context_by_list(entityArr, raw_contents, length=CFG.max_len)
+            # texts = bm25_sample(raw_contents, ''.join(entityArr), augment=1,length=CFG.max_len+len(entity_content))
+            # text = texts[0]
+            # 保证每个实体出现在文本中
+            text = '你对%s怎么看？' % '、'.join(entityArr) + text
+                    
+            newDic = {}
+            temp = {}
+            for i,entity in enumerate(tmp['entity'].keys()):
+                key = '[et%d]' % i
+                newDic[key] = tmp['entity'][entity]
+                temp[entity] = len(entity)
+            temp = sorted(temp.items(), key=lambda x:-x[1]) # 实体按长度排序，避免长词包含短词的情况
+            for idx, item in enumerate(temp):
+                key = '[et%d]' % idx
+                text = text.replace(item[0], key) # 替换原实体
+            # print(text, newDic)
+            # exit()
             corpus.append(text)
-            entitys.append(tmp['entity']) # type:dict {entyty:label, ...}
+            entitys.append(json.dumps(newDic, ensure_ascii=False)) # type:dict {entyty:label, ...}
             weights.append(weight)
                 
     train = {'content':corpus,'entity':entitys, 'weights':weights}
@@ -382,15 +395,29 @@ def get_test_data(input_file):
             raw_id = tmp['id']
             raw_contents = tmp['content'].strip()
             entityArr = tmp['entity']
-            entity_content = '、'.join(entityArr)
-            text = sample_context_by_list(entityArr, raw_contents, CFG.max_len-len(entity_content))
-            # text = bm25_sample(raw_contents, ''.join(entityArr), length=CFG.max_len-len(entity_content))
-            # text = text[0]
-            # text = text[:CFG.max_len-len(entity_content)-3]  # [cls]text[sep]entity_content[sep]
-            
+            entity_content = ''.join(entityArr)
+            text = sample_context_by_list(entityArr, raw_contents, CFG.max_len)
+            # texts = bm25_sample(raw_contents, ''.join(entityArr), augment=1,length=CFG.max_len+len(entity_content))
+            # text = texts[0]
+            # 保证每个实体出现在文本中
+            text = '你对%s怎么看？' % '、'.join(entityArr) + text
+                    
+
+            newArr = []
+            temp = {}
+            for i,entity in enumerate(tmp['entity']):
+                key = '[et%d]' % i
+                newArr.append(key)
+                temp[entity] = len(entity)
+            temp = sorted(temp.items(), key=lambda x:-x[1]) # 实体按长度排序，避免长词包含短词的情况
+
+            for idx, item in enumerate(temp):
+                key = '[et%d]' % idx
+                text = text.replace(item[0], key) # 替换原实体
+
             corpus.append(text)
             ids.append(raw_id)
-            entitys.append(entityArr)
+            entitys.append(json.dumps(newArr, ensure_ascii=False))
 
     assert len(corpus) == len(entitys) == len(ids)
     test = {'id':ids,'content':corpus,'entity':entitys}
@@ -398,17 +425,49 @@ def get_test_data(input_file):
     return test
 
 
-# In[6]:
+# In[8]:
 
 
-# 测试
+#测试
 # tmp_file = '../nlp_data/train.txt'
-# corpus, entitys, content_labels, entity_labels = get_train_data(tmp_file)
-# corpus[0], entitys[0], str(content_labels[0]), str(entity_labels[0])
+# train = get_train_data(tmp_file)
 
 
-# In[7]:
+# In[9]:
 
+
+
+# def creat_mask(content, entityDic):
+#     idDic = {}
+#     for k,v in entityDic.items():
+#         idDic[tokenizer(k).input_ids[1]] = v 
+    
+#     inputs = tokenizer(content,add_special_tokens=True,
+#                        truncation = True,
+#                        max_length=CFG.max_len,
+#                        padding="max_length",
+#                        return_offsets_mapping=False)
+#     labels = []
+#     label_ids = []
+#     for each in inputs.input_ids:
+#         if each in idDic:
+#             labels.append(idDic[each]+2)  ## -2~2 => 0~4
+#         else:
+#             labels.append(5) ## other type
+#     assert len(labels) == len(inputs.input_ids)
+#     for k, v in inputs.items():
+#         inputs[k] = torch.tensor(v, dtype=torch.long)
+#     labels = torch.tensor(labels, dtype=torch.long)
+#     return inputs, labels
+
+
+# for item in train.sample(1).itertuples():
+#     content = item.content
+#     dic = json.loads(item.entity)
+#     inputs, labels = creat_mask(content, dic)
+#     print(inputs)
+#     print(labels)
+#     print()
 
 # # 测试
 # tmp_file = '../nlp_data/test.txt'
@@ -416,60 +475,62 @@ def get_test_data(input_file):
 # corpus[0], entitys[0], ids[0], str(content_masks[0]), str(entity_masks[0])
 
 
+# #### Dataset
 
-# In[9]:
+# In[10]:
 
 
 # 载入预训练模型的分词器
 tokenizer = AutoTokenizer.from_pretrained(CFG.model)
+
+print('原始词表大小=', len(tokenizer))
+characters=[]
+for i in range(30):
+    characters.append('[et%d]' % i )
+tokenizer.add_tokens(characters)
+print('当前词表大小=',len(tokenizer))
+
 CFG.tokenizer = tokenizer
 
-def maxtch_token(token_ids:list, sentence_ids:list):
-    # 得到实体的token list在句子的所有开始位置
-    ret = []
-    startId = token_ids[0]
-    for idx, candId in enumerate(sentence_ids):
-        if candId == startId and sentence_ids[idx:idx+len(token_ids)] == token_ids:
-            ret.append(idx)
-    assert len(ret) > 0
-    return ret
 
-def tag_entity_span(entity_startIndexs:list, entityLen:int, tag:int, targets:list):
-    for index in entity_startIndexs:
-        for span in range(entityLen):
-            targets[index+span] = tag
-    return targets
+def prepare_input(content, entitys, labels=None):
+    inputs = tokenizer(content,add_special_tokens=True,
+                       truncation = True,
+                       max_length=CFG.max_len,
+                       padding="max_length",
+                       return_offsets_mapping=False)
+    idDic = {}  # label_id
+    label_ids = []
+    for idx, entity in enumerate(entitys):
+        idDic[tokenizer(entity).input_ids[1]] = idx+1
+    for each in inputs.input_ids:
+        if each in idDic:
+            label_ids.append(idDic[each])  
+        else:
+            label_ids.append(0) 
+    label_ids = torch.tensor(label_ids, dtype=torch.long)
+    if labels==None:
+        pass
+    else: ## 形成标注序列
+        idDic = {}
+        for idx, entity in enumerate(entitys):
+            idDic[tokenizer(entity).input_ids[1]] = labels[idx]
+        labels = []
+        for each in inputs.input_ids:
+            if each in idDic:
+                labels.append(idDic[each]+3)  ## -2~2 => 1~5
+            else:
+                labels.append(0) ## other type
+        assert len(labels) == len(inputs.input_ids)
+        labels = torch.tensor(labels, dtype=torch.long)
 
-def getTrainEntityInfo(entityDic, TOKENIZER):
-    # entityDic{实体名:标签}
-    tagDic = {}  # {实体名:[实体ids, 实体情感标签, 实体在原字典中的次序, 实体ids长度]}
-    for idx, (entity,label) in enumerate(entityDic.items()):
-        entityIds = TOKENIZER(entity).input_ids[1:-1]
-        tagDic[entity] = [
-            entityIds,
-            int(label)+3,  #-2~2 => 1~5
-            idx+1 , ###从1开始
-            len(entityIds)
-        ]
-    '''
-    按实体ids长度从短到长排序，后面标注时若出现嵌套实体，会先标注短实体，然后标注长实体覆盖短实体标签
-    '''
-    return sorted(tagDic.items(), key=lambda x:x[1][-1])
-
-def getTestEntityInfo(entityArr, TOKENIZER):
-    # entityArr[实体名]
-    tagDic = {}  # {实体名:[实体ids, 实体在原字典中的次序, 实体ids长度]}
-    for idx, entity in enumerate(entityArr):
-        entityIds = TOKENIZER(entity).input_ids[1:-1]
-        tagDic[entity] = [
-            entityIds,
-            idx+1, ###从1开始
-            len(entityIds)
-        ]
-    '''
-    按实体ids长度从短到长排序，后面标注时若出现嵌套实体，会先标注短实体，然后标注长实体覆盖短实体标签
-    '''
-    return sorted(tagDic.items(), key=lambda x:x[1][-1])
+    for k, v in inputs.items():
+        inputs[k] = torch.tensor(v, dtype=torch.long)
+    if labels==None:   
+        return inputs, label_ids
+    else:
+        return inputs, labels, label_ids
+    
 
 class TrainDataset(Dataset):
     def __init__(self, cfg, df):
@@ -482,45 +543,17 @@ class TrainDataset(Dataset):
         return len(self.entitys)
 
     def __getitem__(self, item):
-        # entity_items = list(self.entitys[item].items())
-        # # random.shuffle(entity_items) # 打乱entity列表顺序 每次形成不同的标注序列
-        entityDic = self.entitys[item]
-        text = self.contents[item]
-        entity_content = '、'.join(list(entityDic.keys()))
-        inputs = tokenizer(text, entity_content, 
-                   add_special_tokens=True,
-                   truncation = True,
-                   max_length=CFG.max_len,
-                   padding="max_length",
-                   return_offsets_mapping=False)
+        entityDic = json.loads(self.entitys[item])
+        inputs, labels, label_ids = prepare_input(self.contents[item], 
+                                                  list(entityDic.keys()), 
+                                                  list(entityDic.values()))
 
-        labels = [0] * len(inputs.input_ids)
-        labels_ids = [0] * len(inputs.input_ids)
-        entityInfoItems = getTrainEntityInfo(entityDic, tokenizer)
-        for entity, info in entityInfoItems:
-            entity_startIndexs = maxtch_token(info[0], inputs.input_ids)
-            labels = tag_entity_span(entity_startIndexs, info[-1], info[1], labels)     # 标注label序列
-            labels_ids = tag_entity_span(entity_startIndexs, info[-1], info[2], labels_ids) # 标注labels_ids序列
-        # print(text)
-        # print(entity_content)
-        # for each in zip(inputs.input_ids,labels,labels_ids):
-        #     print(each)
-        # exit()
-        assert len(inputs['input_ids']) == len(labels)
-        assert len(inputs['input_ids']) == len(labels_ids)
-
-        # 转换为tensor
-        for k, v in inputs.items():
-            inputs[k] = torch.tensor(v, dtype=torch.long)
-        labels_ids = torch.tensor(labels_ids, dtype=torch.long)
-        labels = torch.tensor(labels, dtype=torch.long)
-
-        return inputs, labels, labels_ids, self.weights[item]
+        return inputs, labels, label_ids, self.weights[item]
 
 
 # ### 模型定义
 
-# In[10]:
+# In[11]:
 
 
 # 定义模型结构，该结构是取预训练模型最后一层encoder输出，形状为[batch_size, sequence_length, hidden_size]，
@@ -537,8 +570,10 @@ class CustomModel(nn.Module):
         if pretrained:
             print('='*10+f' load PTM from {cfg.model} '+'='*10)
             self.model = AutoModel.from_pretrained(cfg.model, config=self.config)
+            self.model.resize_token_embeddings(len(tokenizer)) 
         else:
-            self.model = AutoModel(self.config)
+            print(self.config)
+            self.model = AutoModel.from_config(self.config)
         self.fc = nn.Linear(self.config.hidden_size, 6)
         self._init_weights(self.fc)
         self.drop1=nn.Dropout(0.1)
@@ -561,19 +596,11 @@ class CustomModel(nn.Module):
             module.weight.data.fill_(1.0)
         
     def loss(self,logits,labels,weights):
-        # loss_fnc = FocalLoss(6)
-        # loss_fnc = nn.CrossEntropyLoss()
-
-        # loss_fnc = nn.CrossEntropyLoss(ignore_index=0)
-
-        # loss_fnc = nn.CrossEntropyLoss(weight=torch.from_numpy(np.array([0.1, 2, 1, 0.5, 1, 3])).float() ,
-        #                                 size_average=True).cuda()
         loss_fnc = nn.CrossEntropyLoss(weight=torch.from_numpy(np.array([0.1, 2, 1, 0.5, 1, 3])).float() ,
                                         size_average=True,
-                                        reduction='none').cuda()
+                                        ignore_index=0).to(device)
         # loss_fnc = nn.CrossEntropyLoss(weight=torch.from_numpy(np.array([0.1, 2, 1, 0.5, 1, 3])).float() ,
-        #                                 size_average=True,
-        #                                 ignore_index=0).cuda()
+        #                                 size_average=True).to(device)
         # loss_fnc = DiceLoss(smooth = 1, square_denominator = True, with_logits = True,  alpha = 0.01 )
         loss = loss_fnc(logits, labels)
 
@@ -587,7 +614,6 @@ class CustomModel(nn.Module):
         # avg = torch.cat((out.hidden_states[1].unsqueeze(2), 
         #                  out.hidden_states[-1].unsqueeze(2)), dim=2)                # [batch, seq, 2, emd_dim]
         # feature = F.avg_pool2d(avg.transpose(2, 3),kernel_size=(1,2)).squeeze(-1)   # [batch, seq, emd_dim]
-
         if  training:
             logits1 = self.fc(self.drop1(feature))
             logits2 = self.fc(self.drop2(feature))
@@ -610,9 +636,10 @@ class CustomModel(nn.Module):
             return output
 
 
-# ### 训练代码
+# ### 验证代码
 
-# In[11]:
+# In[12]:
+
 
 # 模型训练常用工具类，记录指标变化
 class AverageMeter(object):
@@ -644,20 +671,19 @@ def valid_fn(valid_loader, model, device):
             inputs[k] = v.to(device)
         
         with torch.no_grad():
-            y_preds = model(inputs,training=False)
-
+            with torch.cuda.amp.autocast(enabled=CFG.apex):
+                y_preds = model(inputs,training=False)
         batch_pred = y_preds.detach().cpu().numpy()
         labels = np.array(labels.cpu())
 
         for idx, pred_logits in enumerate(batch_pred):
             label = labels[idx]
             id = label_ids[idx]
-
             # line = tokenizer.decode(inputs['input_ids'][idx])
             # line = line.split(' ')
             # print(len(line), line)
             # print(len(label), label)
-            # print(len(id), id)
+            # print(111111111, len(id), id)
 
             for i in range(1, max(id)+1):
                 ind = np.where(id==i)
@@ -686,6 +712,11 @@ def valid_fn(valid_loader, model, device):
     return avg_acc, avg_f1s
 
 
+# ### 训练代码
+
+# In[13]:
+
+
 def train_loop(folds, fold):
     
     LOGGER.info(f"========== fold: {fold} training ==========")
@@ -693,10 +724,9 @@ def train_loop(folds, fold):
     # ====================================================
     # loader
     # ====================================================
-    train_folds = folds[folds['fold'] != fold].reset_index(drop=True)
-    valid_folds = folds[folds['fold'] == fold].reset_index(drop=True)
-    # valid_folds = get_train_data(input_file='../../nlp_data/valid.mini.txt')
-    # print('='*10+f' load valid data from ../../nlp_data/valid.mini.txt length = {len(valid_folds)}'+'='*10)
+    train_folds = folds
+    valid_folds = get_train_data(input_file='../../nlp_data/newTrain.txt')
+    print('='*10+f' load valid data from ../../nlp_data/newTrain.txt length = {len(valid_folds)}'+'='*10)
 
     train_dataset = TrainDataset(CFG, train_folds)
     valid_dataset = TrainDataset(CFG, valid_folds)
@@ -754,11 +784,11 @@ def train_loop(folds, fold):
     num_train_steps = int(len(train_folds) / CFG.batch_size * CFG.epochs)
     scheduler = get_scheduler(CFG, optimizer, num_train_steps)
     
-    if torch.cuda.device_count() > 1:
-        print("Currently training on", torch.cuda.device_count(), "GPUs!")
-        model = nn.DataParallel(model)
+#     if torch.cuda.device_count() > 1:
+#         print("Currently training on", torch.cuda.device_count(), "GPUs!")
+#         model = nn.DataParallel(model)
     model.to(device)
-
+    
     # ====================================================
     # loop
     # ====================================================
@@ -775,6 +805,8 @@ def train_loop(folds, fold):
         # start = end = time.time()
         global_step = 0
         grad_norm = 0
+
+        # valid_fn(valid_loader, model, device)
         tk0=tqdm(enumerate(train_loader),total=len(train_loader))
         for step, (inputs, labels, label_ids, weights) in tk0:
             total_step += 1
@@ -803,8 +835,8 @@ def train_loop(folds, fold):
                 if CFG.batch_scheduler:
                     scheduler.step()
             tk0.set_postfix(Epoch=epoch+1, Loss=losses.avg,lr=scheduler.get_lr()[0])
-            
-            if epoch <=2:
+
+            if epoch <=-1:
                 EVAL_TIMES = 1
             else:
                 EVAL_TIMES = 3
@@ -814,7 +846,7 @@ def train_loop(folds, fold):
                 avg_acc, avg_f1s = valid_fn(valid_loader, model, device)
                 LOGGER.info(f'EVAL on epoch={epoch+1} step={step+1} - Score: {avg_f1s:.4f}')
                 wandb.log({'valid_f1':avg_f1s, 'flod':fold, 'epoch': epoch, 'valid_step':total_step})
-
+                
                 score_gap = avg_f1s - best_score
                 if best_score < avg_f1s:
                     best_score = avg_f1s
@@ -823,6 +855,7 @@ def train_loop(folds, fold):
                 elif abs(score_gap) <= 0.001:
                     torch.save(model.state_dict(),OUTPUT_DIR+f"model_fold{fold}_best.bin")
                     LOGGER.info(f'Epoch {epoch+1} - Save Newwer Score: f1: {avg_f1s:.4f} Model')
+                    
 
         elapsed = time.time() - start_time
         avg_loss = losses.avg
@@ -833,9 +866,17 @@ def train_loop(folds, fold):
     gc.collect()
 
 
-# ### 生成提交文件
+# ### 生成提交文件代码
 
-# In[12]:
+# In[14]:
+
+
+# 定义模型输入的输入mask
+def prepare_mask(cfg, mask1, mask2):
+    pad_len = cfg.max_len-len(mask1)-len(mask2)-3
+    assert pad_len>=0
+    mask_all = [0] + mask1 + [0] + mask2 + [0] + [0] * pad_len
+    return mask_all
 
 class TestDataset(Dataset):
     def __init__(self, cfg, df):
@@ -848,38 +889,19 @@ class TestDataset(Dataset):
         return len(self.entitys)
 
     def __getitem__(self, item):
-        entityArr = self.entitys[item]
-        text = self.contents[item]
-        entity_content = '、'.join(entityArr)
-        inputs = tokenizer(text, entity_content, 
-                   add_special_tokens=True,
-                   truncation = True,
-                   max_length=CFG.max_len,
-                   padding="max_length",
-                   return_offsets_mapping=False)
+        entityArr = json.loads(self.entitys[item])
+        inputs, label_ids = prepare_input(self.contents[item], 
+                                                  entityArr)
 
+        return inputs, label_ids
 
-        labels_ids = [0] * len(inputs.input_ids)
-        entityInfoItems = getTestEntityInfo(entityArr, tokenizer)
-        for entity, info in entityInfoItems:
-            entity_startIndexs = maxtch_token(info[0], inputs.input_ids)
-            labels_ids = tag_entity_span(entity_startIndexs, info[-1], info[1], labels_ids) # 标注labels_ids序列
-
-        assert len(inputs['input_ids']) == len(labels_ids)
-
-        # 转换为tensor
-        for k, v in inputs.items():
-            inputs[k] = torch.tensor(v, dtype=torch.long)
-        labels_ids = torch.tensor(labels_ids, dtype=torch.long)
-
-        return inputs, labels_ids
 def test_and_save_reault(device, test_loader, test_ids, result_path):
     raw_preds = []
     test_pred = []
     for fold in CFG.trn_fold:
         current_idx = 0
         
-        model = CustomModel(CFG, config_path=OUTPUT_DIR+'config.pth', pretrained=True)
+        model = CustomModel(CFG, config_path=OUTPUT_DIR+'config.pth', pretrained=False)
         model.to(device)
         model_path = os.path.join(OUTPUT_DIR, f"model_fold{fold}_best.bin")
         print(f'=========== load model from {model_path} ===========')
@@ -887,8 +909,18 @@ def test_and_save_reault(device, test_loader, test_ids, result_path):
         model.eval()
         tk0 = tqdm(test_loader, total=len(test_loader))
         for (inputs, label_ids) in tk0:
+            # try:
             for k, v in inputs.items():
                 inputs[k] = v.to(device)
+            # except:
+            #     temp = 0
+            #     for k, v in inputs.items():
+            #         temp += 1
+            #         print(k)
+            #         print(v)
+            #         print(11111111, k, type(v))
+            #         print(temp, '==================')
+            #         inputs[k] = v.to(device)
             with torch.no_grad():
                 y_pred_pa_all = model(inputs,training=False)
             batch_pred = (y_pred_pa_all.detach().cpu().numpy())/len(CFG.trn_fold)  # [batchSize, seqLen, 6]
@@ -940,45 +972,45 @@ def test_and_save_reault(device, test_loader, test_ids, result_path):
     np.save(logits_path, np.array(raw_preds))
     print(f"保存logits到:{result_path}")
 
+
 # ### 主程序
 
-# In[13]:
+# In[15]:
 
 
-if __name__ == '__main__':
-    if CFG.train:
-        print('='*10+' TRAIN MODE '+'='*10)
-        
-        train_df = get_train_data(input_file=CFG.train_file)
-        print('='*10+f' load train data from {CFG.train_file} length = {len(train_df)}'+'='*10)
+if CFG.train:
+    print('='*10+' TRAIN MODE '+'='*10)
 
-        Fold = KFold(n_splits=CFG.n_fold, shuffle=True)
-        for n, (train_index, val_index) in enumerate(Fold.split(train_df)):
-        # Fold = GroupKFold(n_splits=CFG.n_fold)
-        # for n, (train_index, val_index) in enumerate(Fold.split(train_df, train_df['entity'], train_df['flag'])):
-            train_df.loc[val_index, 'fold'] = int(n)
-        train_df['fold'] = train_df['fold'].astype(int)
-        # print(train.groupby('fold').size())
+    train_df = get_train_data(input_file=CFG.train_file)
+    print('='*10+f' load train data from {CFG.train_file} length = {len(train_df)}'+'='*10)
 
-        wandb.init(project='sohu-2022-SentimentClassification-seqLabeling-new')
-        for fold in range(CFG.n_fold):
-            if fold in CFG.trn_fold:
-                train_loop(train_df, fold)
-        print("+++ bert train done +++")
+    Fold = KFold(n_splits=CFG.n_fold, shuffle=True)
+    for n, (train_index, val_index) in enumerate(Fold.split(train_df)):
+    # Fold = GroupKFold(n_splits=CFG.n_fold)
+    # for n, (train_index, val_index) in enumerate(Fold.split(train_df, train_df['entity'], train_df['flag'])):
+        train_df.loc[val_index, 'fold'] = int(n)
+    train_df['fold'] = train_df['fold'].astype(int)
+    # print(train.groupby('fold').size())
 
-    else:
-        # valid
-        print('='*10+' VALID MODE '+'='*10)
+    wandb.init(project='sohu-2022-seqLabeling')
+    for fold in range(CFG.n_fold):
+        if fold in CFG.trn_fold:
+            train_loop(train_df, fold)
+    print("+++ bert train done +++")
 
-        test_df = get_test_data(input_file=CFG.test_file)
-        print('='*10+f' load test data from {CFG.test_file} length = {len(test_df)}'+'='*10)
-        
+else:
+    # valid
+    print('='*10+' VALID MODE '+'='*10)
 
-        test_dataset = TestDataset(CFG, test_df)
-        test_loader = DataLoader(test_dataset,
-                        batch_size=256,
-                        shuffle=False,
-                        num_workers=CFG.num_workers, pin_memory=True, drop_last=False)
-        test_and_save_reault(device, test_loader, test_df['id'], OUTPUT_DIR+'output.txt')
-        print("+++ bert valid done +++")
+    test_df = get_test_data(input_file=CFG.test_file)
+    print('='*10+f' load test data from {CFG.test_file} length = {len(test_df)}'+'='*10)
+
+
+    test_dataset = TestDataset(CFG, test_df)
+    test_loader = DataLoader(test_dataset,
+                    batch_size=1,
+                    shuffle=False,
+                    num_workers=CFG.num_workers, pin_memory=True, drop_last=False)
+    test_and_save_reault(device, test_loader, test_df['id'], OUTPUT_DIR+'output.txt')
+    print("+++ bert valid done +++")
 
