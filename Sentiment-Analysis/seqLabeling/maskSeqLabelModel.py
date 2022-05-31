@@ -8,8 +8,7 @@
 # coding: utf-8
 import os
 
-OUTPUT_DIR = './mask_newTest_ernie_sample_saved/'
-# OUTPUT_DIR = './tmp/'
+OUTPUT_DIR = './mask_final_roberta_epoch16_saved/'
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
@@ -62,10 +61,11 @@ class CFG:
     # train_file = '../nlp_data/train.sample.txt'    
     # test_file = '../nlp_data/test.txt'
     # model="/home/yjw/ZYJ_WorkSpace/PTMs/chinese-roberta-wwm-ext/" 
-    train_file = '../../nlp_data/train.shuf.txt'    
+    train_file = '../../nlp_data/final/train.mix.txt'    
+    valid_file = '../../nlp_data/final/valid.mix.txt'    
     test_file = '../../nlp_data/test.txt'
-    # model="/home/zyj/PTMs/ernie-gram-zh/" 
-    model="/home/yjw/ZYJ_WorkSpace/PTMs/ernie-gram-zh/" 
+    model="/home/zyj/sohu/SentimentClassification/domainAdaption/mask_roberta_saved/epoch16/" 
+    # model="/home/yjw/ZYJ_WorkSpace/PTMs/ernie-gram-zh/" 
     # model="/home/yjw/ZYJ_WorkSpace/PTMs/ernie_1.0_skep_large_ch/" 
     scheduler='cosine'                   # ['linear', 'cosine'] # lr scheduler 类型
     batch_scheduler=True                 # 是否每个step结束后更新 lr scheduler
@@ -77,7 +77,7 @@ class CFG:
     decoder_lr=2e-5                      # 自定义输出层的学习率
     batch_size=32
     max_len=512                     
-    weight_decay=0.01        
+    weight_decay=0.01       
     gradient_accumulation_steps=1        # 梯度累计步数，1代表每个batch更新一次
     # max_grad_norm=1000  
     seed=42 
@@ -604,7 +604,7 @@ class CustomModel(nn.Module):
         # loss_fnc = DiceLoss(smooth = 1, square_denominator = True, with_logits = True,  alpha = 0.01 )
         loss = loss_fnc(logits, labels)
 
-        loss = (loss * weights).mean()
+        # loss = (loss * weights).mean()
         return loss
 
     def forward(self, inputs, labels=None, weights=None, training=True):
@@ -725,9 +725,8 @@ def train_loop(folds, fold):
     # loader
     # ====================================================
     train_folds = folds
-    valid_folds = get_train_data(input_file='../../nlp_data/newTrain.txt')
-    print('='*10+f' load valid data from ../../nlp_data/newTrain.txt length = {len(valid_folds)}'+'='*10)
-
+    valid_folds = get_train_data(input_file=CFG.valid_file)
+    print('='*10+f' load valid data from {CFG.valid_file} length = {len(valid_folds)}'+'='*10)
     train_dataset = TrainDataset(CFG, train_folds)
     valid_dataset = TrainDataset(CFG, valid_folds)
 
@@ -836,7 +835,7 @@ def train_loop(folds, fold):
                     scheduler.step()
             tk0.set_postfix(Epoch=epoch+1, Loss=losses.avg,lr=scheduler.get_lr()[0])
 
-            if epoch <=-1:
+            if epoch <=4:
                 EVAL_TIMES = 1
             else:
                 EVAL_TIMES = 3

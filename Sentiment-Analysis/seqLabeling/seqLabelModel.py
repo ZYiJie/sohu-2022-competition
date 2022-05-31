@@ -10,7 +10,7 @@
 
 import os
 
-OUTPUT_DIR = './newTest_erbie_sample_noWeightBatch_fgm_saved/'
+OUTPUT_DIR = './final_roberta_epoch16_saved/'
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
@@ -39,7 +39,7 @@ from torch.optim import Adam, SGD, AdamW
 from torch.utils.data import DataLoader, Dataset
 import transformers
 print(f"transformers.__version__: {transformers.__version__}")
-from transformers import AutoTokenizer, AutoModel, AutoConfig
+from transformers import AutoTokenizer, AutoModel, AutoConfig, BertTokenizer 
 from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
 # from  dice_loss import  DiceLoss
 from  focalloss import  FocalLoss
@@ -61,11 +61,13 @@ class CFG:
     num_workers=0
     # train_file = '../nlp_data/train.sample.txt'    
     # test_file = '../nlp_data/test.txt'
-    # model="/home/yjw/ZYJ_WorkSpace/PTMs/chinese-roberta-wwm-ext/" 
-    train_file = '../../nlp_data/train.shuf.txt'    
+    # model="/home/yjw/ZYJ_WorkSpace/PTMs//" 
+    train_file = '../../nlp_data/final/train.mix.txt'    
+    valid_file = '../../nlp_data/final/valid.mix.txt'    
     test_file = '../../nlp_data/test.txt'
-    model="/home/zyj/PTMs/ernie-gram-zh/" 
-    # model="/home/yjw/ZYJ_WorkSpace/PTMs/ernie-gram-zh/" 
+    model="/home/zyj/sohu/SentimentClassification/domainAdaption/mask_roberta_saved/epoch16/" 
+    # model="/home/zyj/PTMs/ernie-gram-zh/" 
+    # model="/home/zyj/PTMs/chinese-roberta-wwm-ext/" 
     # model="/home/yjw/ZYJ_WorkSpace/PTMs/ernie_1.0_skep_large_ch/" 
     scheduler='cosine'                   # ['linear', 'cosine'] # lr scheduler 类型
     batch_scheduler=True                 # 是否每个step结束后更新 lr scheduler
@@ -421,7 +423,8 @@ def get_test_data(input_file):
 
 
 # 载入预训练模型的分词器
-tokenizer = AutoTokenizer.from_pretrained(CFG.model)
+# tokenizer = AutoTokenizer.from_pretrained(CFG.model)
+tokenizer = BertTokenizer.from_pretrained(CFG.model)
 CFG.tokenizer = tokenizer
 
 def maxtch_token(token_ids:list, sentence_ids:list):
@@ -527,25 +530,23 @@ class FGM():
         self.model = model
         self.backup = {}
 
-    def attack(self, epsilon=1., emb_name1='embedding'):
+    def attack(self, epsilon=0.3, emb_name='embedding'):
         # emb_name这个参数要换成你模型中embedding的参数名
         for name, param in self.model.named_parameters():
-            if param.requires_grad and emb_name1 in name:
+            if param.requires_grad and emb_name in name:
                 self.backup[name] = param.data.clone()
                 norm = torch.norm(param.grad)
-                if norm != 0:
+                if norm != 0 and not torch.isnan(norm):
                     r_at = epsilon * param.grad / norm
                     param.data.add_(r_at)
 
-
-    def restore(self, emb_name1='embedding'):
+    def restore(self, emb_name='embedding'):
         # emb_name这个参数要换成你模型中embedding的参数名
         for name, param in self.model.named_parameters():
-            if param.requires_grad and emb_name1 in name:
+            if param.requires_grad and emb_name in name: 
                 assert name in self.backup
                 param.data = self.backup[name]
-        self.backup = {}
-
+        self.backup = {} 
 
 # 定义模型结构，该结构是取预训练模型最后一层encoder输出，形状为[batch_size, sequence_length, hidden_size]，
 # 在1维取平均，得到[batch_size, hidden_size]的特征向量，传递给分类层得到[batch_size, 5]的向量输出，代表每条文本在五个类别上的得分，最后使用softmax将得分规范化
@@ -563,6 +564,7 @@ class CustomModel(nn.Module):
             self.model = AutoModel.from_pretrained(cfg.model, config=self.config)
         else:
             self.model = AutoModel(self.config)
+        
         self.fc = nn.Linear(self.config.hidden_size, 6)
         self._init_weights(self.fc)
         self.drop1=nn.Dropout(0.1)
@@ -720,8 +722,8 @@ def train_loop(folds, fold):
     # loader
     # ====================================================
     train_folds = folds
-    valid_folds = get_train_data(input_file='../../nlp_data/newTrain.txt')
-    print('='*10+f' load valid data from ../../nlp_data/newTrain.txt length = {len(valid_folds)}'+'='*10)
+    valid_folds = get_train_data(input_file=CFG.valid_file)
+    print('='*10+f' load valid data from {CFG.valid_file} length = {len(valid_folds)}'+'='*10)
 
     train_dataset = TrainDataset(CFG, train_folds)
     valid_dataset = TrainDataset(CFG, valid_folds)
@@ -784,6 +786,9 @@ def train_loop(folds, fold):
         model = nn.DataParallel(model)
     model.to(device)
 
+    # # 对抗训练器
+    # fgm = FGM(model.model)
+
     # ====================================================
     # loop
     # ====================================================
@@ -810,12 +815,24 @@ def train_loop(folds, fold):
             batch_size = labels.size(0)
             with torch.cuda.amp.autocast(enabled=CFG.apex):
                 loss = model(inputs,labels,weights,training=True)
+                
             if CFG.gradient_accumulation_steps > 1:
                 loss = loss / CFG.gradient_accumulation_steps
             if torch.cuda.device_count() > 1:
                 loss = loss.mean()
-            losses.update(loss.item(), batch_size)
             scaler.scale(loss).backward()
+            
+            # fgm.attack() # 在embedding上添加对抗扰动
+            # with torch.cuda.amp.autocast(enabled=CFG.apex):
+            #     loss_adv = model(inputs,labels,weights,training=True)
+            # if CFG.gradient_accumulation_steps > 1:
+            #     loss_adv = loss_adv / CFG.gradient_accumulation_steps
+            # if torch.cuda.device_count() > 1:
+            #     loss_adv = loss_adv.mean()
+            # scaler.scale(loss_adv).backward()
+            # fgm.restore() # 恢复embedding参数
+            
+            losses.update(loss.item(), batch_size)
             # grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), CFG.max_grad_norm)
             if (step + 1) % 10 == 0:
                 wandb.log({'train_loss':loss, 'lr':optimizer.param_groups[0]["lr"], 'flod':fold, 'epoch': epoch})
