@@ -1,0 +1,9 @@
+deepctr_torch==0.2.7
+jieba==0.42.1
+numpy==1.21.6
+pandas==1.1.5
+scikit_learn==1.0.2
+scipy==1.7.3
+tqdm==4.64.0
+transformers==4.18.0
+wandb==0.12.11
