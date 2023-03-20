@@ -1,5 +1,9 @@
 # 2022-Sohu-Competition
 
+**2022搜狐校园 情感分析x推荐排序 算法大赛解决方案分享 - 决赛成绩第9名**
+
+**如有问题欢迎issue讨论，若有帮助点点↗star~**
+
 ---
 
 ## Task1: Sentiment-Analysis-Solution
