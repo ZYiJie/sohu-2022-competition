@@ -4,6 +4,10 @@
 
 **如有问题欢迎issue讨论，若有帮助点点↗star~**
 
+![参赛情况](img/banner.png)
+
+链接：https://www.biendata.xyz/competition/sohu_2022/
+
 ---
 
 ## Task1: Sentiment-Analysis-Solution
